@@ -1,0 +1,529 @@
+#!/usr/bin/env bash
+# hibou — bundle hors ligne : téléchargement, vérification, installation.
+# Local. Isolé. Discret.
+set -euo pipefail
+
+VERSION_HIBOU="0.1.0"
+
+# ─── Réglages (à relire avant chaque bundle) ────────────────────────────────
+DOMAINE="${HIBOU_DOMAINE:-hibou.lan}"
+UBUNTU_SUITE="resolute"            # Ubuntu 26.04
+DEBIAN_SUITE="trixie"              # Debian 13, base de Proxmox VE 9
+NVIDIA_BRANCHE="580"               # à vérifier : branche prise en charge par Ada ET Turing, présente pour ubuntu2604 et debian13
+NVIDIA_UBUNTU="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2604/x86_64"
+NVIDIA_DEBIAN="https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64"
+NVIDIA_CTK="https://nvidia.github.io/libnvidia-container/stable/deb/amd64"
+
+# Paquets : à vérifier sur les dépôts au moment du téléchargement.
+PAQUETS_UBUNTU="docker-ce docker-ce-cli containerd.io docker-compose-plugin nvidia-container-toolkit \
+nvidia-driver-${NVIDIA_BRANCHE}-open nvidia-utils-${NVIDIA_BRANCHE} libnvidia-compute-${NVIDIA_BRANCHE} \
+chrony zstd jq rsync"
+PAQUETS_PVE="proxmox-default-headers nvidia-open nvidia-persistenced zstd jq rsync"
+
+# Images : le tag sert au téléchargement, l’empreinte (digest) est figée dans MANIFEST.md.
+declare -A IMAGES=(
+  [llama-swap]="ghcr.io/mostlygeek/llama-swap:cuda"
+  [open-webui]="ghcr.io/open-webui/open-webui:main"
+  [forgejo]="codeberg.org/forgejo/forgejo:13"
+  [caddy]="docker.io/library/caddy:2"
+  [registry]="docker.io/library/registry:2"
+)
+OPENCODE_VERSION="latest"          # à figer après le premier test
+declare -A ROLE_IMAGES=(
+  [dev]="llama-swap caddy opencode"
+  [doc]="llama-swap caddy open-webui"
+  [forge]="forgejo caddy registry"
+)
+
+# Modèles : alias | dépôt Hugging Face | motif des fichiers | rôle
+MODELES=(
+  "qwen3.8-27b-q8|unsloth/Qwen3.8-27B-GGUF|*UD-Q8_K_XL*,*mmproj*F16*|dev"
+  "qwen3-coder-next|unsloth/Qwen3-Coder-Next-GGUF|*UD-Q4_K_XL*|dev"
+  "qwen2.5-coder-7b|Qwen/Qwen2.5-Coder-7B-Instruct-GGUF|*q8_0*|dev"
+  "gemma-4-26b|unsloth/gemma-4-26B-A4B-it-GGUF|*UD-Q6_K_XL*,*mmproj*F16*|doc"
+  "qwen3.8-27b-q4|unsloth/Qwen3.8-27B-GGUF|*UD-Q4_K_XL*,*mmproj*F16*|doc"
+  "qwen3-embedding|Qwen/Qwen3-Embedding-0.6B-GGUF|*Q8_0*|doc"
+)
+CAPACITE_SUPPORT_GO=256
+
+# ─── Charte Hibou dans le terminal ──────────────────────────────────────────
+# Jetons de marque en vraies couleurs ; aligner sur tokens.css si les teintes diffèrent.
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  AMBRE=$'\e[38;2;242;169;59m'; BRUME=$'\e[38;2;230;232;239m'
+  PIERRE=$'\e[38;2;154;160;173m'; DANGER=$'\e[38;2;229;107;92m'
+  SUCCES=$'\e[38;2;120;196;150m'; GRAS=$'\e[1m'; FIN=$'\e[0m'
+else
+  AMBRE=""; BRUME=""; PIERRE=""; DANGER=""; SUCCES=""; GRAS=""; FIN=""
+fi
+
+symbole() {
+  printf '%s   /\\_/\\%s\n' "$BRUME" "$FIN"
+  printf '%s  ( %so%s %so%s )%s   %sHibou%s %s%s%s\n' "$BRUME" "$AMBRE" "$BRUME" "$AMBRE" "$BRUME" "$FIN" "$GRAS$BRUME" "$FIN" "$PIERRE" "$VERSION_HIBOU" "$FIN"
+  printf '%s   > ^ <%s    %sL’IA qui veille chez vous.%s\n\n' "$BRUME" "$FIN" "$PIERRE" "$FIN"
+}
+etape()  { printf '\n%s%s%s %s%s%s\n' "$AMBRE" "▸" "$FIN" "$GRAS$BRUME" "$*" "$FIN"; }
+dire()   { printf '  %s%s%s\n' "$BRUME" "$*" "$FIN"; }
+note()   { printf '  %s%s%s\n' "$PIERRE" "$*" "$FIN"; }
+fait()   { printf '  %sFait%s  %s\n' "$SUCCES" "$FIN" "$*"; }
+erreur() { printf '\n  %sErreur%s  %s\n' "$DANGER" "$FIN" "$1" >&2; [[ -n "${2:-}" ]] && printf '  %s%s%s\n' "$PIERRE" "$2" "$FIN" >&2; exit 1; }
+
+exiger_root() { [[ $EUID -eq 0 ]] || erreur "Il me faut les droits administrateur." "Relance avec sudo."; }
+exiger_cmd()  { command -v "$1" >/dev/null || erreur "La commande $1 est absente." "${2:-Installe-la puis relance.}"; }
+
+# ─── Téléchargement (VM connectée) ──────────────────────────────────────────
+telecharger() {
+  local sortie="${1:-$PWD/hibou-bundle-$(date +%Y%m%d)}"
+  exiger_cmd docker "Installe Docker sur la VM de téléchargement."
+  exiger_cmd python3
+  mkdir -p "$sortie"/{apt/ubuntu,apt/pve,images,models,configs}
+  sortie="$(cd "$sortie" && pwd)"
+  dire "Je prépare le bundle dans $sortie."
+
+  etape "Paquets Ubuntu 26.04"
+  # Un conteneur vierge donne la fermeture complète des dépendances.
+  docker run --rm -v "$sortie/apt/ubuntu:/out" "ubuntu:26.04" bash -euc "
+    apt-get update -qq && apt-get install -y -qq ca-certificates curl gnupg dpkg-dev >/dev/null
+    install -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    echo 'deb [signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $UBUNTU_SUITE stable' > /etc/apt/sources.list.d/docker.list
+    curl -fsSL $NVIDIA_UBUNTU/3bf863cc.pub | gpg --dearmor -o /etc/apt/keyrings/cuda.gpg
+    echo 'deb [signed-by=/etc/apt/keyrings/cuda.gpg] $NVIDIA_UBUNTU/ /' > /etc/apt/sources.list.d/cuda.list
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /etc/apt/keyrings/ctk.gpg
+    echo 'deb [signed-by=/etc/apt/keyrings/ctk.gpg] $NVIDIA_CTK /' > /etc/apt/sources.list.d/ctk.list
+    apt-get update -qq
+    apt-get install -y -qq --download-only --no-install-recommends $PAQUETS_UBUNTU
+    cp /var/cache/apt/archives/*.deb /out/
+    cd /out && dpkg-scanpackages -m . /dev/null 2>/dev/null | gzip -9 > Packages.gz"
+  fait "$(find "$sortie/apt/ubuntu" -name '*.deb' | wc -l) paquets Ubuntu."
+
+  etape "Paquets Proxmox VE 9 (Debian 13)"
+  docker run --rm -v "$sortie/apt/pve:/out" "debian:$DEBIAN_SUITE" bash -euc "
+    apt-get update -qq && apt-get install -y -qq ca-certificates curl gnupg dpkg-dev >/dev/null
+    install -d /etc/apt/keyrings
+    curl -fsSL https://enterprise.proxmox.com/debian/proxmox-archive-keyring-$DEBIAN_SUITE.gpg -o /etc/apt/keyrings/pve.gpg
+    echo 'deb [signed-by=/etc/apt/keyrings/pve.gpg] http://download.proxmox.com/debian/pve $DEBIAN_SUITE pve-no-subscription' > /etc/apt/sources.list.d/pve.list
+    curl -fsSL $NVIDIA_DEBIAN/3bf863cc.pub | gpg --dearmor -o /etc/apt/keyrings/cuda.gpg
+    echo 'deb [signed-by=/etc/apt/keyrings/cuda.gpg] $NVIDIA_DEBIAN/ /' > /etc/apt/sources.list.d/cuda.list
+    sed -i 's/Components: main/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources
+    apt-get update -qq
+    apt-get install -y -qq --download-only --no-install-recommends $PAQUETS_PVE
+    cp /var/cache/apt/archives/*.deb /out/
+    cd /out && dpkg-scanpackages -m . /dev/null 2>/dev/null | gzip -9 > Packages.gz"
+  fait "$(find "$sortie/apt/pve" -name '*.deb' | wc -l) paquets Proxmox."
+
+  etape "Images Docker"
+  : > "$sortie/images/digests.txt"
+  for nom in "${!IMAGES[@]}"; do
+    note "$nom"
+    docker pull -q --platform linux/amd64 "${IMAGES[$nom]}" >/dev/null
+    docker save "${IMAGES[$nom]}" | zstd -q -T0 -10 -o "$sortie/images/$nom.tar.zst"
+    printf '%s %s %s\n' "$nom" "${IMAGES[$nom]}" "$(docker inspect --format '{{index .RepoDigests 0}}' "${IMAGES[$nom]}")" >> "$sortie/images/digests.txt"
+  done
+  note "opencode (construite localement)"
+  local ctx; ctx="$(mktemp -d)"
+  cat > "$ctx/Dockerfile" <<EOF
+FROM node:22-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client ca-certificates ripgrep && rm -rf /var/lib/apt/lists/*
+RUN npm install -g opencode-ai@${OPENCODE_VERSION}
+# shortcut: OpenCode installe ses fournisseurs à la volée ; on précharge celui qu’on utilise. Vérifier au premier test hors ligne.
+RUN mkdir -p /home/node/.cache/opencode && cd /home/node/.cache/opencode && npm install @ai-sdk/openai-compatible && chown -R node:node /home/node/.cache
+USER node
+WORKDIR /workspace
+ENTRYPOINT ["opencode"]
+CMD ["serve", "--hostname", "0.0.0.0", "--port", "4096"]
+EOF
+  docker build -q -t "hibou/opencode:$(date +%Y%m%d)" -t hibou/opencode:actuel "$ctx" >/dev/null
+  docker save hibou/opencode:actuel | zstd -q -T0 -10 -o "$sortie/images/opencode.tar.zst"
+  echo "opencode hibou/opencode:actuel construite-$(date +%Y%m%d)" >> "$sortie/images/digests.txt"
+  rm -rf "$ctx"
+  fait "Images enregistrées."
+
+  etape "Modèles"
+  local venv="$sortie/.venv-hf"
+  python3 -m venv "$venv" && "$venv/bin/pip" install -q -U huggingface_hub
+  local ligne alias depot motifs role
+  for ligne in "${MODELES[@]}"; do
+    IFS='|' read -r alias depot motifs role <<< "$ligne"
+    note "$alias ($depot)"
+    local incl=(); IFS=',' read -ra m <<< "$motifs"; for x in "${m[@]}"; do incl+=(--include "$x"); done
+    "$venv/bin/hf" download "$depot" "${incl[@]}" --local-dir "$sortie/models/$alias" >/dev/null
+    rm -rf "$sortie/models/$alias/.cache"
+    ls "$sortie/models/$alias"/*.gguf >/dev/null 2>&1 || erreur "Aucun GGUF pour $alias." "Vérifie le dépôt $depot et le motif $motifs."
+  done
+  rm -rf "$venv"
+  fait "Modèles téléchargés."
+
+  etape "Charte, manifeste, empreintes"
+  [[ -d "${HIBOU_CHARTE:-./charte}" ]] && cp -r "${HIBOU_CHARTE:-./charte}" "$sortie/charte" && fait "Charte copiée."
+  cp "$0" "$sortie/hibou" && chmod +x "$sortie/hibou"
+  {
+    echo "# Bundle Hibou $(date +%Y-%m-%d)"; echo
+    echo "Script : $VERSION_HIBOU · Domaine : $DOMAINE · NVIDIA : branche $NVIDIA_BRANCHE"; echo
+    echo "## Images"; echo; sed 's/^/- /' "$sortie/images/digests.txt"; echo
+    echo "## Modèles"; echo; for ligne in "${MODELES[@]}"; do echo "- ${ligne//|/ · }"; done; echo
+    echo "## Paquets"; echo
+    (cd "$sortie/apt" && find . -name '*.deb' | sort | sed 's/^/- /')
+  } > "$sortie/MANIFEST.md"
+  (cd "$sortie" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+
+  local taille; taille=$(du -s --block-size=1G "$sortie" | cut -f1)
+  fait "Bundle prêt : ${taille} Go."
+  if (( taille > CAPACITE_SUPPORT_GO * 90 / 100 )); then
+    note "Le bundle dépasse 90 % du support de ${CAPACITE_SUPPORT_GO} Go. Retire un modèle de la liste MODELES ou fais deux transferts."
+  fi
+  dire "Copie le dossier sur le disque USB (formaté en ext4), puis lance « hibou verifier » à l’arrivée."
+}
+
+# ─── Vérification ───────────────────────────────────────────────────────────
+verifier() {
+  local b="${1:-$(dirname "$(readlink -f "$0")")}"
+  [[ -f "$b/SHA256SUMS" ]] || erreur "Je ne trouve pas SHA256SUMS dans $b." "Indique le dossier du bundle : hibou verifier /chemin/du/bundle"
+  etape "Vérification des empreintes"
+  if (cd "$b" && sha256sum --quiet -c SHA256SUMS); then fait "Tous les fichiers sont intacts."
+  else erreur "Des fichiers sont abîmés ou manquants." "Recopie-les depuis la VM de téléchargement, puis relance la vérification."; fi
+}
+
+# ─── Installation ───────────────────────────────────────────────────────────
+source_locale() {  # $1 = dossier apt du bundle
+  echo "deb [trusted=yes] file:$1 ./" > /etc/apt/sources.list.d/hibou.list
+  APT_HIBOU=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/hibou.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0)
+  apt-get "${APT_HIBOU[@]}" update -qq
+}
+apt_hibou() { DEBIAN_FRONTEND=noninteractive apt-get "${APT_HIBOU[@]}" install -y -qq --no-install-recommends "$@" >/dev/null; }
+
+charger_images() {  # $1 bundle, $2 rôle
+  local nom
+  for nom in ${ROLE_IMAGES[$2]}; do
+    note "$nom"; zstd -dc "$1/images/$nom.tar.zst" | docker load -q >/dev/null
+  done
+  fait "Images chargées."
+}
+
+copier_modeles() {  # $1 bundle, $2 rôle
+  install -d /srv/models
+  local ligne alias depot motifs role
+  for ligne in "${MODELES[@]}"; do
+    IFS='|' read -r alias depot motifs role <<< "$ligne"
+    [[ "$role" == "$2" ]] || continue
+    note "$alias"; rsync -a "$1/models/$alias/" "/srv/models/$alias/"
+  done
+  fait "Modèles copiés dans /srv/models."
+}
+
+# Premier fichier GGUF d’un modèle (hors projecteur), relatif à /srv/models.
+gguf()   { (cd /srv/models && find "$1" -name '*.gguf' ! -name '*mmproj*' | sort | head -1); }
+mmproj() { (cd /srv/models && find "$1" -name '*mmproj*.gguf' | sort | head -1); }
+
+cle_api() {
+  install -d -m 700 /srv/hibou/secrets
+  [[ -f /srv/hibou/secrets/api-key ]] || head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' > /srv/hibou/secrets/api-key
+  cat /srv/hibou/secrets/api-key
+}
+
+docker_nvidia() {
+  nvidia-ctk runtime configure --runtime=docker >/dev/null
+  systemctl restart docker
+}
+
+caddyfile() {  # $1 = nom public de l’interface, $2 = service:port interne, $3 = nom public de l’API
+  cat > /srv/hibou/Caddyfile <<EOF
+{
+	local_certs
+}
+$1.$DOMAINE {
+	reverse_proxy $2
+}
+$3.$DOMAINE {
+	@sansCle not header Authorization "Bearer {\$HIBOU_API_KEY}"
+	respond @sansCle "Clé d’API absente ou invalide." 401
+	reverse_proxy llama-swap:8080
+}
+EOF
+}
+
+installer_dev() {
+  local b="$1"
+  etape "Pilote NVIDIA, Docker, NVIDIA Container Toolkit"
+  source_locale "$b/apt/ubuntu"
+  apt_hibou $PAQUETS_UBUNTU
+  docker_nvidia
+  fait "Socle installé."
+  etape "Images et modèles"; charger_images "$b" dev; copier_modeles "$b" dev
+
+  etape "Configuration"
+  install -d /srv/hibou /srv/workspace
+  chown 1000:1000 /srv/workspace
+  cat > /srv/hibou/llama-swap.yaml <<EOF
+models:
+  qwen3.8-27b:
+    cmd: /app/llama-server --port \${PORT} -m /models/$(gguf qwen3.8-27b-q8) --mmproj /models/$(mmproj qwen3.8-27b-q8) -ngl 99 -c 131072 -fa on --jinja
+  qwen3-coder-next:
+    cmd: /app/llama-server --port \${PORT} -m /models/$(gguf qwen3-coder-next) -ngl 99 -c 65536 -fa on --jinja
+  qwen2.5-coder-7b:
+    cmd: /app/llama-server --port \${PORT} -m /models/$(gguf qwen2.5-coder-7b) -ngl 99 -c 8192 -fa on
+groups:
+  code:
+    swap: false
+    exclusive: true
+    members: [qwen3.8-27b, qwen2.5-coder-7b]
+EOF
+  cat > /srv/hibou/opencode.json <<'EOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "theme": "hibou",
+  "model": "hibou/qwen3.8-27b",
+  "provider": {
+    "hibou": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Hibou",
+      "options": { "baseURL": "http://llama-swap:8080/v1" },
+      "models": { "qwen3.8-27b": {}, "qwen3-coder-next": {} }
+    }
+  },
+  "permission": {
+    "edit": "allow",
+    "bash": {
+      "*": "ask",
+      "git status*": "allow", "git diff*": "allow", "git log*": "allow",
+      "ls*": "allow", "cat*": "allow", "grep*": "allow", "rg*": "allow",
+      "git push*main*": "deny", "sudo*": "deny"
+    }
+  }
+}
+EOF
+  caddyfile code opencode:4096 llm-dev
+  cat > /srv/hibou/compose.yaml <<EOF
+name: hibou-dev
+services:
+  llama-swap:
+    image: ${IMAGES[llama-swap]}
+    restart: unless-stopped
+    volumes: ["/srv/models:/models:ro", "./llama-swap.yaml:/app/config.yaml:ro"]
+    deploy: { resources: { reservations: { devices: [{ driver: nvidia, count: all, capabilities: [gpu] }] } } }
+    networks: [interne]
+  opencode:
+    image: hibou/opencode:actuel
+    restart: unless-stopped
+    volumes: ["/srv/workspace:/workspace", "./opencode.json:/home/node/.config/opencode/opencode.json:ro"]
+    networks: [interne]
+  caddy:
+    image: ${IMAGES[caddy]}
+    restart: unless-stopped
+    ports: ["443:443"]
+    environment: { HIBOU_API_KEY: "$(cle_api)" }
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy:/data"]
+    networks: [interne, externe]
+networks:
+  interne: { internal: true }
+  externe: {}
+volumes: { caddy: {} }
+EOF
+  chmod 600 /srv/hibou/compose.yaml
+  (cd /srv/hibou && docker compose up -d --quiet-pull 2>/dev/null)
+  fait "Hibou dev démarré : https://code.$DOMAINE et https://llm-dev.$DOMAINE"
+  note "Clé d’API : /srv/hibou/secrets/api-key"
+}
+
+installer_doc() {
+  local b="$1"
+  etape "Pilote NVIDIA (espace utilisateur), Docker, NVIDIA Container Toolkit"
+  [[ -e /dev/nvidia0 ]] || erreur "Je ne vois aucun GPU dans ce conteneur." "Sur l’hôte, lance « hibou installer pve », applique la configuration LXC indiquée, puis redémarre le conteneur."
+  source_locale "$b/apt/ubuntu"
+  # Pas de modules noyau dans un LXC : ils viennent de l’hôte.
+  apt_hibou docker-ce docker-ce-cli containerd.io docker-compose-plugin nvidia-container-toolkit \
+    "nvidia-utils-$NVIDIA_BRANCHE" "libnvidia-compute-$NVIDIA_BRANCHE" chrony zstd jq rsync
+  nvidia-ctk config --set nvidia-container-cli.no-cgroups=true --in-place
+  docker_nvidia
+  local hote ici
+  hote="$(cat /proc/driver/nvidia/version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
+  ici="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 || true)"
+  [[ -n "$ici" && "$hote" == "$ici" ]] || erreur "Pilote de l’hôte ($hote) et du conteneur (${ici:-illisible}) différents." "Installe les deux depuis le même bundle."
+  fait "Socle installé, pilote $ici, $(nvidia-smi -L | wc -l) GPU visibles."
+  etape "Images et modèles"; charger_images "$b" doc; copier_modeles "$b" doc
+
+  etape "Configuration"
+  install -d /srv/hibou
+  local split="--split-mode layer --tensor-split 1,1,1,1"
+  cat > /srv/hibou/llama-swap.yaml <<EOF
+models:
+  gemma-4-26b:
+    cmd: /app/llama-server --port \${PORT} -m /models/$(gguf gemma-4-26b) --mmproj /models/$(mmproj gemma-4-26b) -ngl 99 $split -c 65536 -fa on --jinja
+  qwen3.8-27b:
+    cmd: /app/llama-server --port \${PORT} -m /models/$(gguf qwen3.8-27b-q4) --mmproj /models/$(mmproj qwen3.8-27b-q4) -ngl 99 $split -c 32768 -fa on --jinja
+  qwen3-embedding:
+    cmd: /app/llama-server --port \${PORT} -m /models/$(gguf qwen3-embedding) -ngl 0 --embedding --pooling last
+groups:
+  rag:
+    persistent: true
+    swap: false
+    exclusive: false
+    members: [qwen3-embedding]
+EOF
+  caddyfile chat open-webui:8080 llm-doc
+  cat > /srv/hibou/compose.yaml <<EOF
+name: hibou-doc
+services:
+  llama-swap:
+    image: ${IMAGES[llama-swap]}
+    restart: unless-stopped
+    volumes: ["/srv/models:/models:ro", "./llama-swap.yaml:/app/config.yaml:ro"]
+    deploy: { resources: { reservations: { devices: [{ driver: nvidia, count: all, capabilities: [gpu] }] } } }
+    networks: [interne]
+  open-webui:
+    image: ${IMAGES[open-webui]}
+    restart: unless-stopped
+    environment:
+      WEBUI_NAME: Hibou
+      OFFLINE_MODE: "true"
+      HF_HUB_OFFLINE: "1"
+      ENABLE_OLLAMA_API: "false"
+      OPENAI_API_BASE_URLS: http://llama-swap:8080/v1
+      OPENAI_API_KEYS: hibou
+      RAG_EMBEDDING_ENGINE: openai
+      RAG_OPENAI_API_BASE_URL: http://llama-swap:8080/v1
+      RAG_OPENAI_API_KEY: hibou
+      RAG_EMBEDDING_MODEL: qwen3-embedding
+    volumes: ["open-webui:/app/backend/data"]
+    networks: [interne]
+  caddy:
+    image: ${IMAGES[caddy]}
+    restart: unless-stopped
+    ports: ["443:443"]
+    environment: { HIBOU_API_KEY: "$(cle_api)" }
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy:/data"]
+    networks: [interne, externe]
+networks:
+  interne: { internal: true }
+  externe: {}
+volumes: { open-webui: {}, caddy: {} }
+EOF
+  chmod 600 /srv/hibou/compose.yaml
+  (cd /srv/hibou && docker compose up -d --quiet-pull 2>/dev/null)
+  fait "Hibou doc démarré : https://chat.$DOMAINE et https://llm-doc.$DOMAINE"
+}
+
+installer_pve() {
+  local b="$1"
+  [[ -f /etc/pve/.version ]] || erreur "Ce n’est pas un hôte Proxmox." "Lance ce rôle sur le 7910, en root."
+  etape "En-têtes Proxmox et pilote NVIDIA de l’hôte"
+  source_locale "$b/apt/pve"
+  apt_hibou $PAQUETS_PVE
+  systemctl enable --now nvidia-persistenced >/dev/null 2>&1 || true
+  fait "Pilote installé."
+  etape "Configuration du conteneur LXC doc"
+  local f=/root/hibou-lxc-doc.conf i=0 d
+  : > "$f"
+  for d in /dev/nvidia0 /dev/nvidia1 /dev/nvidia2 /dev/nvidia3 /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-caps/nvidia-cap1 /dev/nvidia-caps/nvidia-cap2; do
+    echo "dev$i: $d" >> "$f"; i=$((i + 1))
+  done
+  echo "features: nesting=1,keyctl=1" >> "$f"
+  fait "Lignes à ajouter à /etc/pve/lxc/<id>.conf : $f"
+  note "Les périphériques n’existent qu’après un redémarrage de l’hôte. Redémarre, vérifie nvidia-smi, puis ajoute ces lignes."
+}
+
+installer_forge() {
+  local b="$1"
+  etape "Docker"
+  source_locale "$b/apt/ubuntu"
+  apt_hibou docker-ce docker-ce-cli containerd.io docker-compose-plugin chrony zstd jq rsync
+  fait "Docker installé."
+  etape "Images"; charger_images "$b" forge
+  etape "Forgejo et registre"
+  install -d /srv/forgejo/data /srv/registry
+  cat > /srv/forgejo/Caddyfile <<EOF
+{
+	local_certs
+}
+forge.$DOMAINE {
+	reverse_proxy forgejo:3000
+}
+registry.$DOMAINE {
+	reverse_proxy registry:5000
+}
+EOF
+  cat > /srv/forgejo/compose.yaml <<EOF
+name: hibou-forge
+services:
+  forgejo:
+    image: ${IMAGES[forgejo]}
+    restart: unless-stopped
+    environment:
+      FORGEJO__server__DOMAIN: forge.$DOMAINE
+      FORGEJO__server__ROOT_URL: https://forge.$DOMAINE/
+      FORGEJO__server__SSH_PORT: "2222"
+      FORGEJO__server__OFFLINE_MODE: "true"
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+      FORGEJO__ui__DEFAULT_THEME: forgejo-dark
+    volumes: ["./data:/data"]
+    ports: ["2222:22"]
+  registry:
+    image: ${IMAGES[registry]}
+    restart: unless-stopped
+    volumes: ["/srv/registry:/var/lib/registry"]
+  caddy:
+    image: ${IMAGES[caddy]}
+    restart: unless-stopped
+    ports: ["443:443"]
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy:/data"]
+volumes: { caddy: {} }
+EOF
+  (cd /srv/forgejo && docker compose up -d --quiet-pull 2>/dev/null)
+  fait "Forgejo démarré : https://forge.$DOMAINE"
+  note "Crée le premier compte administrateur : docker exec -u git hibou-forge-forgejo-1 forgejo admin user create --admin --username <nom> --email <adresse> --random-password"
+  note "Racine de l’autorité interne à installer sur les postes : docker cp hibou-forge-caddy-1:/data/caddy/pki/authorities/local/root.crt ."
+}
+
+installer() {
+  local role="${1:-}" b="${2:-$(dirname "$(readlink -f "$0")")}"
+  [[ -n "${ROLE_IMAGES[$role]:-}" || "$role" == "pve" ]] || erreur "Rôle inconnu : ${role:-aucun}." "Choisis dev, doc, forge ou pve."
+  exiger_root
+  [[ -f "$b/MANIFEST.md" ]] || erreur "Je ne trouve pas le bundle dans $b." "Indique son dossier : hibou installer $role /chemin/du/bundle"
+  verifier "$b"
+  "installer_$role" "$b"
+  printf '\n'; dire "J’ai terminé le rôle $role."
+}
+
+# ─── Autotest ───────────────────────────────────────────────────────────────
+autotest() {
+  local ligne alias depot motifs role n=0
+  for ligne in "${MODELES[@]}"; do
+    IFS='|' read -r alias depot motifs role <<< "$ligne"
+    [[ -n "$alias" && "$depot" == */* && -n "$motifs" ]] || erreur "Ligne de modèle mal formée : $ligne"
+    [[ "$role" == dev || "$role" == doc ]] || erreur "Rôle de modèle inconnu : $role"
+    n=$((n + 1))
+  done
+  for role in "${!ROLE_IMAGES[@]}"; do
+    for alias in ${ROLE_IMAGES[$role]}; do
+      [[ "$alias" == opencode || -n "${IMAGES[$alias]:-}" ]] || erreur "Image $alias du rôle $role absente de IMAGES."
+    done
+  done
+  fait "Configuration cohérente : $n modèles, ${#IMAGES[@]} images, 4 rôles."
+}
+
+aide() {
+  cat <<EOF
+  ${GRAS}${BRUME}Utilisation${FIN}
+    hibou telecharger [dossier]          Sur la VM connectée : prépare le bundle.
+    hibou verifier [dossier]             Contrôle les empreintes SHA-256.
+    hibou installer <rôle> [dossier]     Installe un rôle depuis le bundle.
+    hibou autotest                       Vérifie la cohérence des réglages.
+
+  ${GRAS}${BRUME}Rôles${FIN}
+    pve     Hôte Proxmox du 7910 : pilote NVIDIA, configuration LXC.
+    forge   VM forge : Forgejo, registre, Caddy.
+    doc     Conteneur LXC doc : llama-swap, Open WebUI, Caddy.
+    dev     Precision 5820 : llama-swap, OpenCode, Caddy.
+
+  ${PIERRE}Ordre conseillé : pve, forge, doc, dev. Domaine : $DOMAINE (variable HIBOU_DOMAINE).${FIN}
+EOF
+}
+
+symbole
+case "${1:-aide}" in
+  telecharger) shift; telecharger "$@" ;;
+  verifier)    shift; verifier "$@" ;;
+  installer)   shift; installer "$@" ;;
+  autotest)    autotest ;;
+  aide|-h|--help) aide ;;
+  *) erreur "Commande inconnue : $1." "Lance « hibou aide » pour voir les commandes." ;;
+esac

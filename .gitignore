@@ -1,0 +1,4 @@
+hibou-bundle-*/
+.venv-hf/
+*.tar.zst
+*.gguf

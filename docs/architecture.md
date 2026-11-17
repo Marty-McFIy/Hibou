@@ -14,55 +14,43 @@ Hibou fournit deux IA locales sans aucune connexion sortante : une IA de dévelo
 ## Vue d’ensemble
 
 ```mermaid
-flowchart TB
+flowchart LR
   net(["Internet"]):::ext
-  dl["VM de téléchargement<br/>Ubuntu 26.04.1 · seule machine connectée"]:::ext
-  usb[/"Disque USB<br/>bundle daté + SHA256SUMS"/]:::ext
-  net --> dl
-  dl -- "hibou telecharger" --> usb
+  dl["VM de téléchargement<br/>seule machine connectée"]:::ext
+  usb[/"Disque USB<br/>bundle + SHA256SUMS"/]:::ext
+  net --> dl -- "hibou telecharger" --> usb
 
-  subgraph reseau["Réseau local isolé · hibou.lan · aucune passerelle"]
+  cli["Postes clients"]
+
+  subgraph dev["5820 · IA de dev"]
     direction TB
-    cli["Postes clients<br/>navigateur · SSH"]
+    c1["Caddy :443"] --> oc["OpenCode"] --> ld["llama-swap<br/>Qwen3.8-27B · Coder"]
+  end
 
-    subgraph n5820["Precision 5820 · RTX 6000 Ada 48 Go — IA de développement"]
-      c1["Caddy :443"]
-      oc["OpenCode :4096"]
-      ld["llama-swap → llama-server<br/>Qwen3.8-27B · Coder-Next · Coder 7B"]
-      c1 --> oc --> ld
+  subgraph pve["7910 · Proxmox"]
+    direction TB
+    subgraph doc["LXC doc · IA de doc"]
+      direction TB
+      c2["Caddy :443"] --> ow["Open WebUI"] --> lm["llama-swap<br/>Gemma 4 · Qwen3.8 · Embedding"]
     end
-
-    subgraph n7910["Precision 7910 · Proxmox VE 9 · 4 × Quadro RTX 4000"]
-      subgraph doc["LXC doc — IA de documentation"]
-        c2["Caddy :443"]
-        ow["Open WebUI :8080"]
-        lm["llama-swap → llama-server<br/>Gemma 4 · Qwen3.8-27B Q4 · Embedding"]
-        c2 --> ow --> lm
-      end
-      subgraph forge["VM forge — services communs"]
-        c3["Caddy :443"]
-        fj["Forgejo · SSH :2222<br/>+ runner Actions"]
-        rg["Registre Docker"]
-        c3 --> fj
-        c3 --> rg
-      end
+    subgraph forge["VM forge"]
+      direction TB
+      c3["Caddy :443"] --> fj["Forgejo + runner<br/>SSH :2222"]
+      c3 --> rg["Registre Docker"]
     end
   end
 
-  usb -. "unique entrée : docker load + push" .-> rg
-  rg -. "images" .-> c1
-  rg -. "images" .-> c2
-  cli -- "code.hibou.lan<br/>llm-dev.hibou.lan" --> c1
-  cli -- "chat.hibou.lan<br/>llm-doc.hibou.lan" --> c2
-  cli -- "forge.hibou.lan<br/>registry.hibou.lan" --> c3
-  oc -- "clone / push hibou/*" --> fj
+  usb -- "seule entrée" --> rg
+  cli -- "code. · llm-dev." --> c1
+  cli -- "chat. · llm-doc." --> c2
+  cli -- "forge. · registry." --> c3
+  oc -- "git hibou/*" --> fj
   ow -- "OIDC" --> fj
-  ow -. "option : modèles du 5820" .-> ld
 
   classDef ext fill:#2F3B52,stroke:#8A93A6,color:#E9E4D8
 ```
 
-Deux nœuds (5820 et 7910), deux guests sur le 7910 (`doc` en LXC, `forge` en VM) et une seule entrée : le bundle transporté par disque.
+Deux nœuds (5820 et 7910), deux guests sur le 7910 (`doc` en LXC, `forge` en VM) et une seule entrée : le bundle transporté par disque, déposé dans le registre de `forge`, d’où les deux nœuds tirent leurs images. Les adresses sont en `*.hibou.lan`.
 
 Chaque IA tourne sur sa propre carte et reste joignable via Caddy en HTTPS ; Forgejo et le registre, dans la VM `forge`, servent les deux nœuds. La seule entrée est le bundle déposé par disque dans le registre.
 

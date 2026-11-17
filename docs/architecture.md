@@ -13,6 +13,11 @@ Hibou fournit deux IA locales sans aucune connexion sortante : une IA de dévelo
 
 ## Vue d’ensemble
 
+![Infrastructure Hibou : deux nœuds, un conteneur doc, une VM forge, une seule entrée par le bundle](infrastructure.svg)
+
+<details>
+<summary>Version Mermaid</summary>
+
 ```mermaid
 flowchart LR
   net(["Internet"]):::ext
@@ -49,6 +54,8 @@ flowchart LR
 
   classDef ext fill:#2F3B52,stroke:#8A93A6,color:#E9E4D8
 ```
+
+</details>
 
 Deux nœuds (5820 et 7910), deux guests sur le 7910 (`doc` en LXC, `forge` en VM) et une seule entrée : le bundle transporté par disque, déposé dans le registre de `forge`, d’où les deux nœuds tirent leurs images. Les adresses sont en `*.hibou.lan`.
 

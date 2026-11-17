@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" width="1200" height="780" role="img" aria-labelledby="t d" font-family="Inter, system-ui, sans-serif">
+  <title id="t">Infrastructure Hibou</title>
+  <desc id="d">Deux nœuds, 5820 (IA de développement) et 7910 Proxmox (conteneur doc et VM forge), dans un réseau isolé. La seule entrée est le bundle préparé sur la VM de téléchargement et transporté par disque USB jusqu'au registre Docker de forge.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8A93A6"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#F2B544"/></marker>
+    <style>
+      text{fill:#E9E4D8;font-size:14px}
+      .s{fill:#8A93A6;font-size:12px}
+      .h{font-size:13px;font-weight:600;fill:#8A93A6;letter-spacing:.04em}
+      .box{fill:#0F1420;stroke:#6A7893;stroke-width:1.5}
+      .ext{fill:#2F3B52;stroke:#8A93A6;stroke-width:1.5}
+      .f1{fill:#171E2D;stroke:#2F3B52;stroke-width:2}
+      .f2{fill:#1F2839;stroke:#6A7893;stroke-width:1.5}
+      .l{fill:none;stroke:#8A93A6;stroke-width:1.75;marker-end:url(#a)}
+      .la{fill:none;stroke:#F2B544;stroke-width:2.25;marker-end:url(#b)}
+      .amb{fill:#F2B544;font-size:12px;font-weight:600}
+    </style>
+  </defs>
+  <rect width="1200" height="780" fill="#0F1420"/>
+
+  <!-- Chaîne de téléchargement -->
+  <rect class="ext" x="40" y="45" width="110" height="50" rx="25"/><text x="95" y="75" text-anchor="middle">Internet</text>
+  <rect class="ext" x="210" y="35" width="240" height="70" rx="8"/><text x="330" y="66" text-anchor="middle">VM de téléchargement</text><text class="s" x="330" y="86" text-anchor="middle">seule machine connectée</text>
+  <rect class="ext" x="560" y="35" width="260" height="70" rx="8"/><text x="690" y="66" text-anchor="middle">Disque USB</text><text class="s" x="690" y="86" text-anchor="middle">bundle daté + SHA256SUMS</text>
+  <path class="l" d="M150 70H208"/>
+  <path class="l" d="M450 70H558"/><text class="s" x="504" y="60" text-anchor="middle">hibou telecharger</text>
+
+  <!-- Réseau isolé -->
+  <rect class="f1" x="30" y="140" width="1140" height="620" rx="14"/>
+  <text class="h" x="50" y="748">RÉSEAU LOCAL ISOLÉ · hibou.lan · AUCUNE PASSERELLE</text>
+  <text class="s" x="1150" y="748" text-anchor="end">Les deux nœuds tirent leurs images depuis le registre de forge.</text>
+
+  <rect class="box" x="40" y="400" width="150" height="70" rx="8"/><text x="115" y="431" text-anchor="middle">Postes clients</text><text class="s" x="115" y="451" text-anchor="middle">navigateur · SSH</text>
+
+  <!-- 7910 -->
+  <rect class="f1" x="300" y="180" width="520" height="540" rx="12"/>
+  <text class="h" x="320" y="203">PRECISION 7910 · PROXMOX VE 9 · 4 × QUADRO RTX 4000</text>
+
+  <rect class="f2" x="320" y="215" width="480" height="200" rx="10"/><text class="h" x="336" y="236">VM forge · services communs</text>
+  <rect class="box" x="345" y="282" width="115" height="56" rx="8"/><text x="402" y="306" text-anchor="middle">Caddy :443</text><text class="s" x="402" y="324" text-anchor="middle">forge. · registry.</text>
+  <rect class="box" x="545" y="245" width="230" height="50" rx="8"/><text x="660" y="275" text-anchor="middle">Registre Docker</text>
+  <rect class="box" x="545" y="330" width="230" height="65" rx="8"/><text x="660" y="358" text-anchor="middle">Forgejo + runner Actions</text><text class="s" x="660" y="378" text-anchor="middle">SSH :2222</text>
+  <path class="l" d="M460 300L543 272"/><path class="l" d="M460 320L543 355"/>
+
+  <rect class="f2" x="320" y="440" width="480" height="250" rx="10"/><text class="h" x="336" y="461">LXC doc · IA de documentation</text>
+  <rect class="box" x="345" y="537" width="115" height="56" rx="8"/><text x="402" y="561" text-anchor="middle">Caddy :443</text><text class="s" x="402" y="579" text-anchor="middle">chat. · llm-doc.</text>
+  <rect class="box" x="500" y="540" width="120" height="50" rx="8"/><text x="560" y="570" text-anchor="middle">Open WebUI</text>
+  <rect class="box" x="650" y="510" width="130" height="110" rx="8"/><text x="715" y="540" text-anchor="middle">llama-swap</text><text class="s" x="715" y="562" text-anchor="middle">Gemma 4 26B</text><text class="s" x="715" y="580" text-anchor="middle">Qwen3.8-27B Q4</text><text class="s" x="715" y="598" text-anchor="middle">Embedding</text>
+  <path class="l" d="M460 565H498"/><path class="l" d="M620 565H648"/>
+  <path class="l" d="M560 538V397"/><text class="s" x="570" y="490">OIDC</text>
+
+  <!-- 5820 -->
+  <rect class="f1" x="860" y="180" width="280" height="540" rx="12"/>
+  <text class="h" x="880" y="203">PRECISION 5820 · RTX 6000 ADA</text>
+  <text class="h" x="880" y="221">IA DE DÉVELOPPEMENT</text>
+  <rect class="box" x="885" y="262" width="230" height="56" rx="8"/><text x="1000" y="286" text-anchor="middle">Caddy :443</text><text class="s" x="1000" y="304" text-anchor="middle">code. · llm-dev.</text>
+  <rect class="box" x="885" y="340" width="230" height="50" rx="8"/><text x="1000" y="370" text-anchor="middle">OpenCode</text>
+  <rect class="box" x="885" y="440" width="230" height="110" rx="8"/><text x="1000" y="470" text-anchor="middle">llama-swap</text><text class="s" x="1000" y="492" text-anchor="middle">Qwen3.8-27B Q8</text><text class="s" x="1000" y="510" text-anchor="middle">Qwen3-Coder-Next · Coder 7B</text>
+  <path class="l" d="M1000 318V338"/><path class="l" d="M1000 390V438"/>
+  <path class="l" d="M885 365L777 365"/><text class="s" x="831" y="357" text-anchor="middle">git</text>
+
+  <!-- Clients -->
+  <path class="l" d="M190 425H245V310H343"/>
+  <path class="l" d="M190 445H245V565H343"/>
+  <path class="l" d="M115 400V160H1000V260"/>
+  <!-- au-dessus des cadres -->
+  <path class="la" d="M760 105V243"/><text class="amb" x="772" y="127">seule entrée : docker load + push</text>
+</svg>

@@ -1,0 +1,107 @@
+/* Hibou — généré depuis tokens.json (ne pas modifier à la main) */
+@font-face{font-family:"Fraunces";src:url("fonts/Fraunces-600.woff2") format("woff2");font-weight:600;font-style:normal;font-display:swap}
+@font-face{font-family:"Inter";src:url("fonts/Inter-variable.woff2") format("woff2");font-weight:100 900;font-style:normal;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url("fonts/JetBrainsMono-500.woff2") format("woff2");font-weight:500;font-style:normal;font-display:swap}
+:root,[data-theme="nuit"]{
+  --nuit:#0F1420;
+  --ardoise:#2F3B52;
+  --ambre:#F2B544;
+  --brume:#E9E4D8;
+  --pierre:#8A93A6;
+  --fond:var(--nuit);
+  --fond-creux:#0A0E17;
+  --surface:#171E2D;
+  --surface-haute:#1F2839;
+  --filet:var(--ardoise);
+  --filet-fort:#6A7893;
+  --texte:var(--brume);
+  --texte-doux:var(--pierre);
+  --accent:var(--ambre);
+  --sur-accent:var(--nuit);
+  --accent-fonce:#B9821F;
+  --accent-texte:var(--ambre);
+  --accent-doux:#2B2618;
+  --succes:#5CC8B8;
+  --succes-doux:#12312E;
+  --danger:#F0876B;
+  --danger-doux:#3A1E18;
+  --logo-bec:var(--ardoise);
+  --anneau:var(--ambre);
+  --relief-1:inset 0 1px 0 rgba(233,228,216,0.07), 0 1px 2px rgba(0,0,0,0.5);
+  --relief-2:inset 0 1px 0 rgba(233,228,216,0.08), 0 2px 4px rgba(0,0,0,0.45), 0 8px 20px rgba(0,0,0,0.4);
+  --relief-3:inset 0 1px 0 rgba(233,228,216,0.1), 0 4px 8px rgba(0,0,0,0.45), 0 24px 48px rgba(0,0,0,0.55);
+  --creux:inset 0 2px 4px rgba(0,0,0,0.6), inset 0 -1px 0 rgba(233,228,216,0.05);
+  --relief-accent:inset 0 1px 0 rgba(255,255,255,0.45), 0 2px 0 #b9821f, 0 6px 14px rgba(0,0,0,0.4);
+  --lueur:0 0 0 1px rgba(242,181,68,0.4), 0 0 24px rgba(242,181,68,0.3);
+  --anneau-focus:0 0 0 2px #0f1420, 0 0 0 4px #f2b544;
+}
+[data-theme="brume"]{
+  --nuit:#0F1420;
+  --ardoise:#2F3B52;
+  --ambre:#F2B544;
+  --brume:#E9E4D8;
+  --pierre:#8A93A6;
+  --fond:var(--brume);
+  --fond-creux:#DCD6C7;
+  --surface:#F2EEE4;
+  --surface-haute:#FBF8F1;
+  --filet:#C9C3B4;
+  --filet-fort:#787262;
+  --texte:var(--nuit);
+  --texte-doux:#4A5468;
+  --accent:var(--ambre);
+  --sur-accent:var(--nuit);
+  --accent-fonce:#8A5F0A;
+  --accent-texte:#7A4F00;
+  --accent-doux:#F1E0B4;
+  --succes:#0B5F54;
+  --succes-doux:#CFE6DC;
+  --danger:#9E2D17;
+  --danger-doux:#F3D5C9;
+  --logo-bec:var(--ambre);
+  --anneau:var(--nuit);
+  --relief-1:inset 0 1px 0 rgba(255,255,255,0.8), 0 1px 2px rgba(15,20,32,0.18);
+  --relief-2:inset 0 1px 0 rgba(255,255,255,0.9), 0 2px 4px rgba(15,20,32,0.12), 0 8px 20px rgba(15,20,32,0.14);
+  --relief-3:inset 0 1px 0 rgba(255,255,255,0.95), 0 4px 8px rgba(15,20,32,0.12), 0 24px 48px rgba(15,20,32,0.2);
+  --creux:inset 0 2px 4px rgba(15,20,32,0.16), inset 0 -1px 0 rgba(255,255,255,0.7);
+  --relief-accent:inset 0 1px 0 rgba(255,255,255,0.55), 0 2px 0 #8a5f0a, 0 6px 14px rgba(15,20,32,0.2);
+  --lueur:0 0 0 1px rgba(138,95,10,0.5), 0 0 20px rgba(242,181,68,0.55);
+  --anneau-focus:0 0 0 2px #e9e4d8, 0 0 0 4px #0f1420;
+}
+:root{
+  --espace-1:4px;
+  --espace-2:8px;
+  --espace-3:12px;
+  --espace-4:16px;
+  --espace-5:24px;
+  --espace-6:32px;
+  --espace-7:48px;
+  --espace-8:64px;
+  --rayon-sm:6px;
+  --rayon-md:8px;
+  --rayon-lg:14px;
+  --rayon-xl:22px;
+  --rayon-pilule:999px;
+  --duree-instant:90ms;
+  --duree-rapide:160ms;
+  --duree-posee:280ms;
+  --duree-lente:480ms;
+  --duree-veille:4200ms;
+  --courbe-sortie:cubic-bezier(0.2, 0.8, 0.2, 1);
+  --courbe-entree:cubic-bezier(0.5, 0, 0.9, 0.3);
+  --courbe-ressort:cubic-bezier(0.34, 1.45, 0.64, 1);
+  --courbe-veille:cubic-bezier(0.45, 0, 0.55, 1);
+  --font-titre:Fraunces, Georgia, serif;
+  --font-texte:Inter, system-ui, sans-serif;
+  --font-code:"JetBrains Mono", ui-monospace, monospace;
+}
+.t-affiche{font-family:var(--font-titre);font-size:132px;line-height:1;font-weight:600;}
+.t-titre{font-family:var(--font-titre);font-size:52px;line-height:1.1;font-weight:600;}
+.t-sous-titre{font-family:var(--font-titre);font-size:28px;line-height:1.25;font-weight:600;}
+.t-intertitre{font-family:var(--font-titre);font-size:22px;line-height:1.3;font-weight:600;}
+.t-corps{font-family:var(--font-texte);font-size:18px;line-height:1.5;font-weight:400;}
+.t-corps-petit{font-family:var(--font-texte);font-size:16px;line-height:1.6;font-weight:400;}
+.t-legende{font-family:var(--font-texte);font-size:14px;line-height:1.4;font-weight:400;}
+.t-action{font-family:var(--font-texte);font-size:15px;line-height:1;font-weight:600;}
+.t-code{font-family:var(--font-code);font-size:16px;line-height:1.9;font-weight:500;}
+.t-etiquette{font-family:var(--font-code);font-size:13px;line-height:1.4;font-weight:500;letter-spacing:0.12em; text-transform:uppercase;}

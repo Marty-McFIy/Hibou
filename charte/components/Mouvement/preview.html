@@ -1,0 +1,15 @@
+<!-- @dsCard group="Fondations" height=220 -->
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>Mouvement</title></head>
+<body>
+<style>.rail{position:relative;height:28px;border-radius:999px;background:var(--fond-creux);box-shadow:var(--creux)}.bille{position:absolute;top:4px;left:4px;width:20px;height:20px;border-radius:50%;background:var(--accent);box-shadow:var(--relief-accent);animation:va 2600ms infinite alternate}.l{display:grid;grid-template-columns:150px 1fr;gap:16px;align-items:center}</style><div class="hb-demo hb-demo--col" style="gap:14px">
+<div class="l"><span class="hb-note">courbe-sortie</span><div class="rail"><span class="bille" style="animation-timing-function:var(--courbe-sortie)"></span></div></div>
+<div class="l"><span class="hb-note">courbe-entree</span><div class="rail"><span class="bille" style="animation-timing-function:var(--courbe-entree)"></span></div></div>
+<div class="l"><span class="hb-note">courbe-ressort</span><div class="rail"><span class="bille" style="animation-timing-function:var(--courbe-ressort)"></span></div></div>
+<div class="l"><span class="hb-note">courbe-veille</span><div class="rail"><span class="bille" style="animation-timing-function:var(--courbe-veille)"></span></div></div></div><style>@keyframes va{0%,15%{left:4px}85%,100%{left:calc(100% - 24px)}}</style>
+<script>
+
+</script>
+</body>
+</html>

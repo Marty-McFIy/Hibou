@@ -1,0 +1,15 @@
+<!-- @dsCard group="Identité" height=300 -->
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>Logo</title></head>
+<body>
+<div class="hb-demo" id="r" style="gap:40px"></div>
+<script>
+var r=document.getElementById("r"),H=window.Hibou;
+r.appendChild(H.Logo({taille:150,relief:true,vivant:true,etat:"veille"}));
+var b=document.createElement("div");b.style.cssText="padding:28px;background:var(--brume);border-radius:var(--rayon-lg);box-shadow:var(--relief-2)";b.appendChild(H.Logo({taille:96,variante:"sur-brume",etat:"veille"}));r.appendChild(b);
+var n=document.createElement("div");n.style.cssText="padding:28px;background:var(--nuit);border-radius:var(--rayon-lg);box-shadow:var(--relief-2)";n.appendChild(H.Logo({taille:96,variante:"sur-nuit",etat:"veille"}));r.appendChild(n);
+[48,32,24].forEach(function(t){r.appendChild(H.Logo({taille:t}))});
+</script>
+</body>
+</html>

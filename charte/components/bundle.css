@@ -1,0 +1,191 @@
+/* Hibou — composants (CSS seul, sans dépendance, hors ligne).
+   À charger après tokens.css. Préfixe : hb-. Thème : <html data-theme="nuit|brume">. */
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--fond);color:var(--texte);font-family:var(--font-texte);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.hb-demo{display:flex;flex-wrap:wrap;align-items:center;gap:var(--espace-5);padding:var(--espace-5)}
+.hb-demo--col{flex-direction:column;align-items:stretch}
+.hb-note{font-family:var(--font-code);font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--texte-doux)}
+
+/* ---- Logo ---- */
+.hb-logo{--taille:96px;display:inline-block;flex:none;width:var(--taille);height:var(--taille);overflow:visible}
+.hb-logo__tete{fill:var(--texte)}
+.hb-logo__orbite{fill:var(--fond)}
+.hb-logo__iris{fill:var(--accent)}
+.hb-logo__pupille{fill:var(--nuit)}
+.hb-logo__bec{fill:var(--logo-bec)}
+.hb-logo__corps,.hb-logo__regard,.hb-logo__pupille,.hb-logo__iris{transform-box:fill-box;transform-origin:center}
+.hb-logo__corps{transform-origin:50% 85%;transition:transform var(--duree-lente) var(--courbe-ressort)}
+.hb-logo--sur-nuit .hb-logo__tete{fill:var(--brume)}.hb-logo--sur-nuit .hb-logo__orbite{fill:var(--nuit)}.hb-logo--sur-nuit .hb-logo__bec{fill:var(--ardoise)}
+.hb-logo--sur-brume .hb-logo__tete{fill:var(--nuit)}.hb-logo--sur-brume .hb-logo__orbite{fill:var(--brume)}.hb-logo--sur-brume .hb-logo__bec{fill:var(--ambre)}
+/* relief : l'ombre est portée par le support, la silhouette reste plate */
+.hb-logo--relief{filter:drop-shadow(0 1px 0 rgba(0,0,0,.35)) drop-shadow(0 8px 14px rgba(0,0,0,.35))}
+/* le hibou penche la tête quand on le survole */
+.hb-logo--vivant:hover .hb-logo__corps{transform:rotate(-9deg)}
+/* états du veilleur */
+.hb-logo[data-etat="veille"] .hb-logo__regard{animation:hb-cligner var(--duree-veille) var(--courbe-veille) infinite}
+.hb-logo[data-etat="ecoute"] .hb-logo__pupille{animation:hb-dilater 2400ms var(--courbe-veille) infinite}
+.hb-logo[data-etat="reflexion"] .hb-logo__regard{animation:hb-chercher 2800ms var(--courbe-veille) infinite}
+.hb-logo[data-etat="ecriture"] .hb-logo__regard{animation:hb-lire 1800ms var(--courbe-veille) infinite}
+.hb-logo[data-etat="ecriture"] .hb-logo__iris{animation:hb-braise 1800ms var(--courbe-veille) infinite}
+.hb-logo[data-etat="erreur"] .hb-logo__corps{animation:hb-refuser 520ms var(--courbe-sortie) 1}
+.hb-logo[data-etat="erreur"] .hb-logo__pupille{transform:scale(.55)}
+.hb-logo[data-etat="endormi"] .hb-logo__regard{transform:scaleY(.1)}
+.hb-logo__regard,.hb-logo__pupille{transition:transform var(--duree-posee) var(--courbe-sortie)}
+@keyframes hb-cligner{0%,91%,100%{transform:scaleY(1)}94.5%{transform:scaleY(.08)}}
+@keyframes hb-dilater{0%,100%{transform:scale(1)}50%{transform:scale(1.5)}}
+@keyframes hb-chercher{0%,100%{transform:translate(0,0)}20%{transform:translate(-3.2px,-1px)}45%{transform:translate(-3.2px,-1px)}60%{transform:translate(3.2px,-1.6px)}85%{transform:translate(3.2px,-1.6px)}}
+@keyframes hb-lire{0%{transform:translate(-2.6px,2.4px)}70%{transform:translate(2.6px,2.4px)}82%{transform:translate(2.6px,2.4px) scaleY(.1)}90%,100%{transform:translate(-2.6px,2.4px)}}
+@keyframes hb-braise{0%,100%{opacity:1}50%{opacity:.72}}
+@keyframes hb-refuser{0%,100%{transform:rotate(0)}20%{transform:rotate(-7deg)}45%{transform:rotate(6deg)}70%{transform:rotate(-4deg)}}
+
+/* ---- Logotype (symbole + nom) ---- */
+.hb-logotype{display:inline-flex;align-items:center;gap:calc(var(--taille,96px)*.25);color:var(--texte);text-decoration:none}
+.hb-logotype .hb-logo{--taille:inherit}
+.hb-logotype__nom{font-family:var(--font-titre);font-weight:600;font-size:calc(var(--taille,96px)*.825);line-height:1;letter-spacing:-.005em}
+
+/* ---- Icône d'application ---- */
+.hb-app{--taille:96px;position:relative;display:inline-grid;place-items:center;flex:none;width:var(--taille);height:var(--taille);border-radius:calc(var(--taille)*.225);background:linear-gradient(180deg,#1f2839,#0a0e17);box-shadow:inset 0 1px 0 rgba(233,228,216,.22),inset 0 -2px 0 rgba(0,0,0,.5),0 2px 4px rgba(0,0,0,.35),0 14px 28px rgba(0,0,0,.4);transition:transform var(--duree-posee) var(--courbe-ressort),box-shadow var(--duree-posee) var(--courbe-sortie)}
+.hb-app .hb-logo{--taille:72%;width:72%;height:72%;filter:drop-shadow(0 calc(var(--taille,96px)*.03) 0 rgba(5,7,12,.55))}
+.hb-app--vivante:hover{transform:translateY(-3px) scale(1.03)}
+.hb-app--vivante:active{transform:translateY(1px) scale(.98)}
+
+/* ---- Bouton ---- */
+.hb-bouton{--_fond:var(--surface-haute);--_encre:var(--texte);--_bord:var(--filet-fort);--_ombre:var(--relief-1);--_ombre-haut:var(--relief-2);
+  display:inline-flex;align-items:center;justify-content:center;gap:var(--espace-2);height:40px;padding:0 var(--espace-4);border:1px solid var(--_bord);border-radius:var(--rayon-md);background:var(--_fond);color:var(--_encre);font:600 15px/1 var(--font-texte);text-decoration:none;white-space:nowrap;cursor:pointer;box-shadow:var(--_ombre);
+  transition:transform var(--duree-instant) var(--courbe-sortie),box-shadow var(--duree-rapide) var(--courbe-sortie),background-color var(--duree-rapide) var(--courbe-sortie)}
+.hb-bouton:hover{transform:translateY(-1px);box-shadow:var(--_ombre-haut)}
+.hb-bouton:active{transform:translateY(2px);box-shadow:var(--creux);transition-duration:var(--duree-instant)}
+.hb-bouton:focus-visible{outline:2px solid transparent;outline-offset:2px;box-shadow:var(--anneau-focus)}
+.hb-bouton--principal{--_fond:var(--accent);--_encre:var(--sur-accent);--_bord:var(--accent-fonce);--_ombre:var(--relief-accent);--_ombre-haut:var(--relief-accent)}
+.hb-bouton--principal:active{box-shadow:inset 0 2px 3px rgba(0,0,0,.25)}
+.hb-bouton--discret{--_fond:transparent;--_encre:var(--accent-texte);--_bord:transparent;--_ombre:none;--_ombre-haut:none}
+.hb-bouton--discret:hover{background:var(--accent-doux);transform:none}
+.hb-bouton--rond{width:40px;padding:0;border-radius:var(--rayon-pilule)}
+.hb-bouton--grand{height:48px;padding:0 var(--espace-5);font-size:16px}
+.hb-bouton:disabled,.hb-bouton[aria-disabled="true"]{opacity:.45;pointer-events:none;box-shadow:none}
+
+/* ---- Bascule ---- */
+.hb-bascule{display:inline-flex;align-items:center;gap:var(--espace-3);cursor:pointer;font-size:15px}
+.hb-bascule input{position:absolute;opacity:0;width:1px;height:1px}
+.hb-bascule__rail{position:relative;flex:none;width:46px;height:26px;border-radius:var(--rayon-pilule);border:1px solid var(--filet-fort);background:var(--fond-creux);box-shadow:var(--creux);transition:background-color var(--duree-posee) var(--courbe-sortie),border-color var(--duree-posee) var(--courbe-sortie)}
+.hb-bascule__rail::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:var(--texte-doux);box-shadow:var(--relief-1);transition:transform var(--duree-posee) var(--courbe-ressort),background-color var(--duree-posee) var(--courbe-sortie)}
+.hb-bascule input:checked+.hb-bascule__rail{background:var(--accent);border-color:var(--accent-fonce)}
+.hb-bascule input:checked+.hb-bascule__rail::after{transform:translateX(20px);background:var(--nuit)}
+.hb-bascule input:focus-visible+.hb-bascule__rail{box-shadow:var(--anneau-focus)}
+
+/* ---- Champ & invite ---- */
+.hb-champ{display:flex;flex-direction:column;gap:var(--espace-2);min-width:240px}
+.hb-champ__libelle{font-size:14px;font-weight:600}
+.hb-champ__aide{font-size:13px;color:var(--texte-doux)}
+.hb-champ__saisie{height:44px;padding:0 var(--espace-3);border:1px solid var(--filet-fort);border-radius:var(--rayon-md);background:var(--fond-creux);color:var(--texte);font:400 16px/1.4 var(--font-texte);box-shadow:var(--creux);transition:border-color var(--duree-rapide) var(--courbe-sortie),box-shadow var(--duree-rapide) var(--courbe-sortie)}
+.hb-champ__saisie::placeholder{color:var(--texte-doux);opacity:1}
+.hb-champ__saisie:focus{outline:2px solid transparent;border-color:var(--anneau);box-shadow:var(--creux),var(--anneau-focus)}
+.hb-champ--erreur .hb-champ__saisie{border-color:var(--danger)}
+.hb-champ--erreur .hb-champ__aide{color:var(--danger)}
+.hb-invite{display:flex;align-items:flex-end;gap:var(--espace-2);padding:var(--espace-2);border:1px solid var(--filet-fort);border-radius:var(--rayon-lg);background:var(--fond-creux);box-shadow:var(--creux);transition:border-color var(--duree-rapide) var(--courbe-sortie),box-shadow var(--duree-posee) var(--courbe-sortie)}
+.hb-invite:focus-within{border-color:var(--accent-fonce);box-shadow:var(--creux),var(--lueur)}
+.hb-invite__texte{flex:1;min-height:40px;padding:9px var(--espace-2);border:0;background:none;color:var(--texte);font:400 16px/1.4 var(--font-texte);resize:none;outline:none}
+.hb-invite__texte::placeholder{color:var(--texte-doux);opacity:1}
+
+/* ---- Carte ---- */
+.hb-carte{padding:var(--espace-5);border:1px solid var(--filet);border-radius:var(--rayon-lg);background:var(--surface);box-shadow:var(--relief-1)}
+.hb-carte--haute{background:var(--surface-haute);box-shadow:var(--relief-2)}
+.hb-carte--flottante{background:var(--surface-haute);box-shadow:var(--relief-3)}
+.hb-carte--creuse{background:var(--fond-creux);box-shadow:var(--creux)}
+.hb-carte--vivante{transition:transform var(--duree-posee) var(--courbe-sortie),box-shadow var(--duree-posee) var(--courbe-sortie)}
+.hb-carte--vivante:hover{transform:translateY(-3px);box-shadow:var(--relief-3)}
+.hb-carte__titre{margin:0;font:600 22px/1.3 var(--font-titre)}
+.hb-carte__texte{margin:var(--espace-2) 0 0;font-size:16px;line-height:1.5;color:var(--texte-doux)}
+.hb-entree{animation:hb-entrer var(--duree-lente) var(--courbe-sortie) both;animation-delay:calc(var(--i,0)*70ms)}
+@keyframes hb-entrer{from{opacity:0;transform:translateY(10px)}}
+
+/* ---- État ---- */
+.hb-etat{--_c:var(--texte-doux);display:inline-flex;align-items:center;gap:var(--espace-2);height:28px;padding:0 var(--espace-3) 0 10px;border:1px solid var(--filet);border-radius:var(--rayon-pilule);background:var(--surface);color:var(--texte);font:500 13px/1 var(--font-code);box-shadow:var(--relief-1);white-space:nowrap}
+.hb-etat__point{position:relative;flex:none;width:8px;height:8px;border-radius:50%;background:var(--_c)}
+.hb-etat .hb-icone{color:var(--_c)}
+.hb-etat--veille{--_c:var(--accent-texte)}
+.hb-etat--veille .hb-etat__point{animation:hb-respirer var(--duree-veille) var(--courbe-veille) infinite}
+.hb-etat--actif{--_c:var(--succes)}
+.hb-etat--actif .hb-etat__point::after{content:"";position:absolute;inset:0;border-radius:50%;border:1.5px solid var(--_c);animation:hb-onde 1600ms var(--courbe-sortie) infinite}
+.hb-etat--erreur{--_c:var(--danger)}
+@keyframes hb-respirer{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.8)}}
+@keyframes hb-onde{from{opacity:.9;transform:scale(1)}to{opacity:0;transform:scale(3.2)}}
+
+/* ---- Attente ---- */
+.hb-attente{display:inline-flex;align-items:center;gap:6px;height:20px}
+.hb-attente i{width:12px;height:12px;border-radius:50%;background:var(--accent);box-shadow:inset 0 0 0 3.5px var(--accent),inset 0 0 0 12px var(--nuit);border:1px solid var(--accent-fonce);animation:hb-cligner-vite 1400ms var(--courbe-veille) infinite}
+.hb-attente i:last-child{animation-delay:180ms}
+@keyframes hb-cligner-vite{0%,55%,100%{transform:scaleY(1)}70%{transform:scaleY(.12)}}
+.hb-squelette{display:block;height:12px;border-radius:var(--rayon-sm);background:linear-gradient(90deg,var(--surface) 0%,var(--surface-haute) 40%,var(--filet) 50%,var(--surface-haute) 60%,var(--surface) 100%) 0 0/300% 100%;animation:hb-balayer 1800ms linear infinite}
+@keyframes hb-balayer{from{background-position:100% 0}to{background-position:0 0}}
+
+/* ---- Terminal (toujours sombre, dans les deux thèmes) ---- */
+.hb-terminal{margin:0;padding:var(--espace-5);border:1px solid var(--ardoise);border-radius:var(--rayon-lg);background:var(--nuit);color:var(--brume);font:500 15px/1.9 var(--font-code);box-shadow:inset 0 1px 0 rgba(233,228,216,.07),0 2px 4px rgba(0,0,0,.3),0 12px 28px rgba(0,0,0,.3);overflow:hidden;white-space:pre}
+.hb-terminal__invite{color:var(--ambre)}
+.hb-terminal__cle{color:var(--pierre)}
+.hb-terminal__ligne{display:block}
+.hb-terminal--anime .hb-terminal__ligne{opacity:0;animation:hb-ligne 1ms linear forwards;animation-delay:calc(900ms + var(--i,0)*220ms)}
+.hb-terminal--anime .hb-terminal__frappe{display:inline-block;vertical-align:bottom;overflow:hidden;white-space:pre;width:0;animation:hb-frapper 800ms steps(var(--n,11)) 150ms forwards}
+@keyframes hb-ligne{to{opacity:1}}
+@keyframes hb-frapper{to{width:calc(var(--n,11)*1ch)}}
+.hb-curseur{display:inline-block;width:.6em;height:1.15em;margin-left:2px;vertical-align:-.2em;background:var(--accent);border-radius:1px;animation:hb-battre 1060ms steps(1) infinite}
+.hb-terminal .hb-curseur{background:var(--ambre)}
+@keyframes hb-battre{50%{opacity:0}}
+
+/* ---- Réponse (texte qui s'écrit) ---- */
+.hb-reponse{max-width:62ch;font-size:18px;line-height:1.5}
+.hb-reponse__mot{opacity:0;animation:hb-mot var(--duree-posee) var(--courbe-sortie) forwards;animation-delay:calc(var(--i,0)*45ms)}
+@keyframes hb-mot{from{opacity:0;filter:blur(3px)}to{opacity:1;filter:none}}
+.hb-message{display:flex;gap:var(--espace-3);align-items:flex-start}
+.hb-message__auteur{flex:none;margin-top:2px}
+
+/* ---- Suggestion (ajouts et retraits dans un texte) ---- */
+.hb-suggestion{font-size:18px;line-height:1.7}
+.hb-ajout,.hb-retrait{display:inline-block;max-width:40ch;padding:0 3px;border-radius:4px;text-decoration:none;white-space:nowrap;vertical-align:bottom;overflow:hidden;transition:max-width var(--duree-posee) var(--courbe-entree),opacity var(--duree-posee) var(--courbe-entree),padding var(--duree-posee) var(--courbe-entree),background-color var(--duree-lente) var(--courbe-sortie),box-shadow var(--duree-lente) var(--courbe-sortie)}
+.hb-ajout{background:var(--succes-doux);box-shadow:inset 0 -2px 0 var(--succes)}
+.hb-retrait{background:var(--danger-doux);text-decoration:line-through;text-decoration-color:var(--danger);text-decoration-thickness:2px}
+.hb-suggestion[data-etat="acceptee"] .hb-retrait,.hb-suggestion[data-etat="refusee"] .hb-ajout{max-width:0;padding:0;opacity:0}
+.hb-suggestion[data-etat="acceptee"] .hb-ajout,.hb-suggestion[data-etat="refusee"] .hb-retrait{background:transparent;box-shadow:none;text-decoration:none}
+
+@media (prefers-reduced-motion:reduce){
+  .hb-logo *,.hb-etat__point,.hb-etat__point::after,.hb-attente i,.hb-squelette,.hb-curseur,.hb-entree,.hb-reponse__mot,.hb-terminal--anime .hb-terminal__ligne,.hb-terminal--anime .hb-terminal__frappe{animation:none!important;opacity:1;width:auto;filter:none}
+  .hb-bouton,.hb-carte--vivante,.hb-app,.hb-logo__corps,.hb-ajout,.hb-retrait,.hb-bascule__rail::after{transition:none!important}
+}
+/* ---- Icônes (générées) : masque CSS, la couleur vient de `color` ---- */
+.hb-icone{--taille:20px;display:inline-block;flex:none;width:var(--taille);height:var(--taille);background-color:currentColor;-webkit-mask:var(--hb-i) center/contain no-repeat;mask:var(--hb-i) center/contain no-repeat;vertical-align:-0.2em}
+.hb-icone--sm{--taille:16px}.hb-icone--lg{--taille:24px}.hb-icone--xl{--taille:32px}
+.hb-icone--ecrire{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M4 20l3.5-1L19 7.5a2.1 2.1 0 0 0-3-3L4.5 16z%22/%3E%3Cpath d=%22M14 6.5l3 3%22/%3E%3C/svg%3E")}
+.hb-icone--document{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z%22/%3E%3Cpath d=%22M14 3v5h5%22/%3E%3Cpath d=%22M9 13h6%22/%3E%3Cpath d=%22M9 17h4%22/%3E%3C/svg%3E")}
+.hb-icone--dossier{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z%22/%3E%3C/svg%3E")}
+.hb-icone--terminal{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z%22/%3E%3Cpath d=%22M7 9l3 3-3 3%22/%3E%3Cpath d=%22M13 15h4%22/%3E%3C/svg%3E")}
+.hb-icone--code{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M8 7l-5 5 5 5%22/%3E%3Cpath d=%22M16 7l5 5-5 5%22/%3E%3Cpath d=%22M13.5 5l-3 14%22/%3E%3C/svg%3E")}
+.hb-icone--puce{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M8 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z%22/%3E%3Cpath d=%22M10 10h4v4h-4z%22/%3E%3Cpath d=%22M9 3v3%22/%3E%3Cpath d=%22M15 3v3%22/%3E%3Cpath d=%22M9 18v3%22/%3E%3Cpath d=%22M15 18v3%22/%3E%3Cpath d=%22M3 9h3%22/%3E%3Cpath d=%22M3 15h3%22/%3E%3Cpath d=%22M18 9h3%22/%3E%3Cpath d=%22M18 15h3%22/%3E%3C/svg%3E")}
+.hb-icone--modele{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M12 3l9 5-9 5-9-5z%22/%3E%3Cpath d=%22M3 12l9 5 9-5%22/%3E%3Cpath d=%22M3 16l9 5 9-5%22/%3E%3C/svg%3E")}
+.hb-icone--disque{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M6 4h12l2 10H4z%22/%3E%3Cpath d=%22M4 14h16v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z%22/%3E%3Cpath d=%22M8 17h.01%22/%3E%3Cpath d=%22M12 17h4%22/%3E%3C/svg%3E")}
+.hb-icone--hors-ligne{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M3 3l18 18%22/%3E%3Cpath d=%22M8.5 16a5 5 0 0 1 7 0%22/%3E%3Cpath d=%22M5 12.5a10 10 0 0 1 4-2.6%22/%3E%3Cpath d=%22M13.6 9.6a10 10 0 0 1 5.4 2.9%22/%3E%3Cpath d=%22M2 9a15 15 0 0 1 4.2-2.9%22/%3E%3Cpath d=%22M10.3 5.1A15 15 0 0 1 22 9%22/%3E%3Cpath d=%22M12 19.5h.01%22/%3E%3C/svg%3E")}
+.hb-icone--verrou{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M7 11h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z%22/%3E%3Cpath d=%22M8 11V8a4 4 0 0 1 8 0v3%22/%3E%3Cpath d=%22M12 15v2%22/%3E%3C/svg%3E")}
+.hb-icone--bouclier{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z%22/%3E%3Cpath d=%22M9 12l2 2 4-4%22/%3E%3C/svg%3E")}
+.hb-icone--oeil{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z%22/%3E%3Cpath d=%22M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z%22/%3E%3C/svg%3E")}
+.hb-icone--lune{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z%22/%3E%3C/svg%3E")}
+.hb-icone--eclair{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M13 2L4 14h7l-1 8 9-12h-7z%22/%3E%3C/svg%3E")}
+.hb-icone--envoyer{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M12 19V5%22/%3E%3Cpath d=%22M6 11l6-6 6 6%22/%3E%3C/svg%3E")}
+.hb-icone--arreter{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M8 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z%22/%3E%3C/svg%3E")}
+.hb-icone--copier{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M10 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z%22/%3E%3Cpath d=%22M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3%22/%3E%3C/svg%3E")}
+.hb-icone--recherche{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z%22/%3E%3Cpath d=%22M20 20l-4-4%22/%3E%3C/svg%3E")}
+.hb-icone--reglages{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M4 7h10%22/%3E%3Cpath d=%22M18 7h2%22/%3E%3Cpath d=%22M4 17h2%22/%3E%3Cpath d=%22M10 17h10%22/%3E%3Cpath d=%22M16 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4z%22/%3E%3Cpath d=%22M8 15a2 2 0 1 0 0 4 2 2 0 0 0 0-4z%22/%3E%3C/svg%3E")}
+.hb-icone--plus{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M12 5v14%22/%3E%3Cpath d=%22M5 12h14%22/%3E%3C/svg%3E")}
+.hb-icone--fermer{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M6 6l12 12%22/%3E%3Cpath d=%22M18 6L6 18%22/%3E%3C/svg%3E")}
+.hb-icone--valider{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M5 12.5l4.5 4.5L19 7.5%22/%3E%3C/svg%3E")}
+.hb-icone--alerte{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M12 4l9 16H3z%22/%3E%3Cpath d=%22M12 10v4%22/%3E%3Cpath d=%22M12 17h.01%22/%3E%3C/svg%3E")}
+.hb-icone--info{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z%22/%3E%3Cpath d=%22M12 11v5%22/%3E%3Cpath d=%22M12 8h.01%22/%3E%3C/svg%3E")}
+.hb-icone--corbeille{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M4 7h16%22/%3E%3Cpath d=%22M9 7V4h6v3%22/%3E%3Cpath d=%22M6 7l1 13h10l1-13%22/%3E%3Cpath d=%22M10 11v5%22/%3E%3Cpath d=%22M14 11v5%22/%3E%3C/svg%3E")}
+.hb-icone--telecharger{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M12 4v11%22/%3E%3Cpath d=%22M7 11l5 5 5-5%22/%3E%3Cpath d=%22M5 20h14%22/%3E%3C/svg%3E")}
+.hb-icone--rafraichir{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M20 12a8 8 0 1 1-2.3-5.7%22/%3E%3Cpath d=%22M20 4v5h-5%22/%3E%3C/svg%3E")}
+.hb-icone--historique{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z%22/%3E%3Cpath d=%22M12 7v5l3 2%22/%3E%3C/svg%3E")}
+.hb-icone--resumer{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M4 6h16%22/%3E%3Cpath d=%22M4 10h16%22/%3E%3Cpath d=%22M4 14h10%22/%3E%3Cpath d=%22M4 18h6%22/%3E%3C/svg%3E")}
+.hb-icone--corriger{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M4 7h9%22/%3E%3Cpath d=%22M4 12h6%22/%3E%3Cpath d=%22M4 17h5%22/%3E%3Cpath d=%22M13 16l3 3 5-6%22/%3E%3C/svg%3E")}
+.hb-icone--reformuler{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M10 3l1.8 5.2L17 10l-5.2 1.8L10 17l-1.8-5.2L3 10l5.2-1.8z%22/%3E%3Cpath d=%22M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8z%22/%3E%3C/svg%3E")}
+.hb-icone--message{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-5 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z%22/%3E%3C/svg%3E")}
+.hb-icone--chevron-droit{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M9 6l6 6-6 6%22/%3E%3C/svg%3E")}
+.hb-icone--chevron-bas{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M6 9l6 6 6-6%22/%3E%3C/svg%3E")}
+.hb-icone--menu{--hb-i:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%2224%22 height=%2224%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.75%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M4 7h16%22/%3E%3Cpath d=%22M4 12h16%22/%3E%3Cpath d=%22M4 17h16%22/%3E%3C/svg%3E")}

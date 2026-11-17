@@ -1,0 +1,11 @@
+<!-- @dsCard group="Code" height=170 -->
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>Reponse</title></head>
+<body>
+<div class="hb-demo"><div class="hb-message"><span class="hb-message__auteur" id="a"></span><div id="t"></div></div></div>
+<script>
+var H=window.Hibou;var a=document.getElementById("a"),t=document.getElementById("t");a.appendChild(H.Logo({taille:36,etat:"ecriture"}));function go(){t.innerHTML="";t.appendChild(H.Reponse("J'ai relu ton chapitre. Trois phrases dépassent quarante mots ; je propose de couper la deuxième après « machine ». Rien n'a quitté ton ordinateur."));}go();setInterval(go,9000);
+</script>
+</body>
+</html>

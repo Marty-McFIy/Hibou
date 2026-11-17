@@ -1,0 +1,11 @@
+<!-- @dsCard group="Code" height=150 -->
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>Suggestion</title></head>
+<body>
+<div class="hb-demo hb-demo--col"><p class="hb-suggestion" id="s">Hibou fait tourner vos modèles <span class="hb-retrait">directement</span> sur votre machine<span class="hb-ajout">, sans connexion</span>. Rien ne sort<span class="hb-retrait"> jamais</span>.</p><div style="display:flex;gap:8px"><button class="hb-bouton hb-bouton--principal" id="ok"><span class="hb-icone hb-icone--valider"></span>Accepter</button><button class="hb-bouton" id="non"><span class="hb-icone hb-icone--fermer"></span>Refuser</button><button class="hb-bouton hb-bouton--discret" id="re">Revoir</button></div></div>
+<script>
+var s=document.getElementById("s");document.getElementById("ok").onclick=function(){s.dataset.etat="acceptee"};document.getElementById("non").onclick=function(){s.dataset.etat="refusee"};document.getElementById("re").onclick=function(){delete s.dataset.etat};
+</script>
+</body>
+</html>

@@ -44,7 +44,12 @@ sudo ./hibou installer forge   # VM forge
 sudo ./hibou installer dev     # Precision 5820
 ```
 
-Le pas à pas complet est dans [docs/installation.md](docs/installation.md), l’architecture dans [docs/architecture.md](docs/architecture.md).
+## Documentation
+
+- [Installation pas à pas](docs/installation.md)
+- [Architecture](docs/architecture.md)
+- [Charte graphique](charte/LISEZMOI.md) : jetons, composants, logos, icônes, polices
+- [Contribuer](CONTRIBUTING.md) · [Sécurité](SECURITY.md) · [Changelog](CHANGELOG.md)
 
 ## État
 
@@ -57,3 +62,7 @@ Le pas à pas complet est dans [docs/installation.md](docs/installation.md), l�
 | Supervision | À faire |
 | Thèmes Hibou de Forgejo, Open WebUI, OpenCode | À faire |
 | Jeu d’évaluation `hibou-eval` | À faire |
+
+## Licence
+
+[MIT](LICENSE).

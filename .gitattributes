@@ -1,1 +1,6 @@
 * text=auto eol=lf
+
+# SVG : texte (diffs lisibles), fins de ligne LF
+*.svg text eol=lf
+# Polices de la charte : binaires
+*.woff2 binary

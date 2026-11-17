@@ -1,0 +1,13 @@
+<!-- @dsCard group="Identité" height=260 -->
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>EtatsHibou</title></head>
+<body>
+<div class="hb-demo" id="r" style="gap:28px;justify-content:space-between"></div>
+<script>
+var r=document.getElementById("r"),H=window.Hibou;
+[["veille","Au repos"],["ecoute","Écoute l'invite"],["reflexion","Réfléchit"],["ecriture","Écrit"],["erreur","Refuse"],["endormi","Modèle arrêté"]].forEach(function(e){var c=document.createElement("div");c.className="hb-carte hb-carte--haute";c.style.cssText="display:flex;flex-direction:column;align-items:center;gap:12px;width:128px;padding:20px 8px";c.appendChild(H.Logo({taille:72,etat:e[0]}));var l=document.createElement("div");l.className="hb-note";l.textContent=e[0];var d=document.createElement("div");d.style.cssText="font-size:13px;color:var(--texte-doux)";d.textContent=e[1];c.appendChild(l);c.appendChild(d);r.appendChild(c)});
+setInterval(function(){var s=r.querySelectorAll('[data-etat="erreur"]');s.forEach(function(x){x.removeAttribute("data-etat");void x.offsetWidth;x.setAttribute("data-etat","erreur")})},2600);
+</script>
+</body>
+</html>

@@ -48,7 +48,7 @@ sudo ./hibou installer dev     # Precision 5820
 
 - [Installation pas à pas](docs/installation.md)
 - [Architecture](docs/architecture.md)
-- [Charte](charte/LISEZMOI.md)
+- [Charte graphique](charte/LISEZMOI.md) : jetons, composants, logos, icônes, polices
 - [Contribuer](CONTRIBUTING.md) · [Sécurité](SECURITY.md) · [Changelog](CHANGELOG.md)
 
 ## État

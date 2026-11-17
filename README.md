@@ -62,3 +62,7 @@ sudo ./hibou installer dev     # Precision 5820
 | Supervision | À faire |
 | Thèmes Hibou de Forgejo, Open WebUI, OpenCode | À faire |
 | Jeu d’évaluation `hibou-eval` | À faire |
+
+## Licence
+
+[MIT](LICENSE).

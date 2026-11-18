@@ -165,13 +165,13 @@ Le stockage est la contrainte principale des deux machines : à prévoir avant l
 
 | Machine | Disque | Occupation estimée | Verdict |
 | --- | --- | --- | --- |
-| 5820 | 2 × 240 Go en miroir (240 Go utiles) | OS 25 Go, Docker 30 Go, modèle 32 Go, bundle de mise à jour 60 Go | Tient pour un modèle, aucune marge pour en garder deux ou pour un bundle complet |
+| 5820 | NVMe 256 Go + 2 HDD 1 To en miroir mdadm | OS 25 Go, Docker 30 Go, modèle 32 Go, bundle de mise à jour 60 Go | Modèles du rôle dev (~70 Go) sur le NVMe ; le miroir HDD reçoit les copies de sauvegarde du 7910 |
 | 7910 | NVMe 250 Go | Proxmox 20 Go, VM `doc` 120 Go, VM `forge` 40 Go, sauvegardes `vzdump` | Plein dès la première sauvegarde |
 
 Recommandations :
 
 - Ajouter un disque de 1 à 2 To sur le 7910 (SATA ou second NVMe) pour les modèles, le dépôt de bundles et les sauvegardes `vzdump`. Idéalement, une copie des sauvegardes sur un disque amovible.
-- Sur le 5820, un disque de données de 1 To pour `/srv/models` et les bundles, le miroir 240 Go restant dédié au système.
+- Sur le 5820, garder les modèles sur le NVMe de 256 Go (chargement rapide par llama-swap) et consacrer le miroir des 2 HDD de 1 To aux copies croisées des sauvegardes du 7910.
 - Les Quadro RTX 4000 (Turing) sont prises en charge par llama.cpp en CUDA avec flash attention, mais moins vite que l’Ada : viser des modèles quantifiés en Q4 et un contexte modéré.
 - Les Xeon E5-2637 v4 n’ont que 4 cœurs chacun (8 au total) : laisser 2 cœurs à l’hôte Proxmox.
 - Vérifier que les versions du pilote NVIDIA et de CUDA choisies prennent en charge à la fois Ada (5820) et Turing (7910), pour n’avoir qu’une seule branche dans le bundle.

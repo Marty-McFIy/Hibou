@@ -1,0 +1,8 @@
+{
+  "question": "Quelle carte est la plus chaude, à quelle température, et quelle mémoire utilise-t-elle ?",
+  "attendus": [
+    "2",
+    "84",
+    "7710"
+  ]
+}

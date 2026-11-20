@@ -1,0 +1,9 @@
+{
+  "question": "Transcris ce tableau en Markdown, puis dis quelle machine dépasse le seuil d’alerte de 85 %.",
+  "attendus": [
+    "|",
+    "doc",
+    "88",
+    "srv/models"
+  ]
+}

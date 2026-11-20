@@ -1,0 +1,1 @@
+Écris une classe `CacheLRU(capacite: int)` avec `lire(cle)` (renvoie `None` si absente) et `ecrire(cle, valeur)`. Quand la capacité est dépassée, la clé la moins récemment utilisée (lecture ou écriture) est retirée.

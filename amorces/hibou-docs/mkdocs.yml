@@ -1,0 +1,26 @@
+site_name: Hibou · Documentation
+site_url: https://docs.hibou.lan/
+docs_dir: docs
+theme:
+  name: material
+  language: fr
+  font: false
+  logo: assets/logos/symbole-sur-nuit.svg
+  favicon: assets/logos/favicon.svg
+  palette:
+    - scheme: slate
+      toggle: { icon: material/weather-sunny, name: Thème Brume }
+    - scheme: default
+      toggle: { icon: material/weather-night, name: Thème Nuit }
+  features: [navigation.sections, navigation.top, search.highlight, content.code.copy]
+extra_css:
+  - assets/hibou-jetons.css
+  - assets/hibou-mkdocs.css
+markdown_extensions:
+  - admonition
+  - tables
+  - toc: { permalink: true }
+  - pymdownx.superfences
+  - pymdownx.details
+plugins:
+  - search: { lang: fr }

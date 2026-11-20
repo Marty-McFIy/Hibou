@@ -1,0 +1,37 @@
+name: Documentation
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  documentation:
+    runs-on: hibou-docs
+    steps:
+      # Pas d’action externe : on récupère le dépôt directement depuis Forgejo.
+      - name: Récupérer le dépôt
+        run: |
+          branche="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          git clone --depth 1 --branch "$branche" "http://jeton:${{ github.token }}@forgejo:3000/${{ github.repository }}.git" depot
+      - name: Style Markdown
+        working-directory: depot
+        run: markdownlint-cli2
+      - name: Sections des templates
+        working-directory: depot
+        run: python3 outils/verifier_sections.py
+      - name: Schémas Mermaid
+        working-directory: depot
+        run: bash outils/rendre_schemas.sh
+      - name: Construire le site
+        working-directory: depot
+        run: mkdocs build --strict -d ../site
+      - name: Publier
+        if: github.event_name == 'push'
+        run: rsync -a --delete site/ /publication/
+      - name: Mettre à jour la base de connaissances du chat
+        if: github.event_name == 'push'
+        working-directory: depot
+        env:
+          OWUI_URL: http://open-webui:8080
+          OWUI_CLE: ${{ secrets.OWUI_CLE }}
+        run: python3 outils/synchroniser_owui.py docs

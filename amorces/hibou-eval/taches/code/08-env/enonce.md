@@ -1,0 +1,1 @@
+Écris `lire_env(texte: str) -> dict[str, str]` qui lit un fichier `.env` : lignes `CLE=valeur`, commentaires `#` en début de ligne ignorés, préfixe `export ` toléré, valeurs entre guillemets simples ou doubles débarrassées de leurs guillemets, espaces autour de la clé et de la valeur retirés. Une ligne sans `=` lève `ValueError`.

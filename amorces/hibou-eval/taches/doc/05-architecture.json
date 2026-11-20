@@ -1,0 +1,5 @@
+{
+  "modele": "architecture",
+  "sujet": "Infrastructure Hibou",
+  "notes": "Precision 5820 (Ubuntu 26.04, RTX 6000 Ada) : IA de développement, OpenCode. Precision 7910 (Proxmox 9.2) : conteneur LXC doc avec 4 Quadro RTX 4000 (Open WebUI), VM forge (Forgejo, registre, supervision, DNS). Réseau isolé, mises à jour par bundle sur disque USB. Connexion unique par Forgejo."
+}

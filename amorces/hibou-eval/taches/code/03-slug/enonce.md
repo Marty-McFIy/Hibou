@@ -1,0 +1,1 @@
+Écris `slug(texte: str) -> str` qui produit un identifiant d’URL : minuscules ASCII, accents retirés (`é` → `e`, `œ` → `oe`), tout autre caractère remplacé par un tiret, sans tiret en double ni en bord.

@@ -1,0 +1,5 @@
+{
+  "modele": "decision",
+  "sujet": "GPU du 7910 : passthrough PCI ou conteneur LXC",
+  "notes": "Passthrough : isolation forte, mais exige des groupes IOMMU propres et réserve les cartes à une VM. LXC : pas de contrainte IOMMU, cartes visibles de l’hôte, mais pilotes hôte et conteneur à garder strictement identiques. Choix retenu : LXC."
+}

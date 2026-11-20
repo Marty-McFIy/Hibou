@@ -1,0 +1,5 @@
+{
+  "modele": "procedure",
+  "sujet": "Ajouter un modèle au catalogue llama-swap du 5820",
+  "notes": "Modèles dans /srv/models, configuration /srv/hibou/llama-swap.yaml, redémarrage : docker compose -f /srv/hibou/compose.yaml restart llama-swap. Les modèles arrivent par le bundle, vérifié par SHA256SUMS."
+}

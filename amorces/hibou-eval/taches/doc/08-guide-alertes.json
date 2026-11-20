@@ -1,0 +1,5 @@
+{
+  "modele": "guide-utilisateur",
+  "sujet": "Recevoir les alertes Hibou",
+  "notes": "Alertes envoyées par Prometheus via Alertmanager au serveur ntfy, sujet « hibou », adresse alertes.hibou.lan. Abonnement depuis le navigateur ou l’application ntfy sur le réseau interne. Cinq alertes : machine injoignable, disque à 85 %, GPU à 85 °C, erreur SMART, sauvegarde de plus de 26 h."
+}

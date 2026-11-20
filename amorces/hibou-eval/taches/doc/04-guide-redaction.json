@@ -1,0 +1,5 @@
+{
+  "modele": "guide-utilisateur",
+  "sujet": "Rédiger un document avec Hibou dans Open WebUI",
+  "notes": "Adresse chat.hibou.lan, connexion par le compte Forgejo. Choisir un modèle « Hibou · <type> », donner le sujet et les notes. Publication par l’outil « Publier dans Forgejo », qui ouvre une pull request dans hibou-docs. Le site est docs.hibou.lan."
+}

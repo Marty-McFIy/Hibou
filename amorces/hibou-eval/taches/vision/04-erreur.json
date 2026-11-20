@@ -1,0 +1,8 @@
+{
+  "question": "Que dit ce message, quelle commande l’a provoqué, et que faut-il faire ?",
+  "attendus": [
+    "port",
+    "1024",
+    "443"
+  ]
+}

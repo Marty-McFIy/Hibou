@@ -1,0 +1,5 @@
+{
+  "modele": "fiche-technique",
+  "sujet": "Runner Forgejo Actions",
+  "notes": "Conteneur forgejo-runner sur la VM forge, étiquette hibou-docs, image hibou/docs-builder (MkDocs Material, mermaid-cli, markdownlint). Une tâche à la fois. Publie le site dans /srv/docs-site. Aucune action externe."
+}

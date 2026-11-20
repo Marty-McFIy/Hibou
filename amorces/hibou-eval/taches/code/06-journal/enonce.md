@@ -1,0 +1,1 @@
+Écris `top_ip(lignes: list[str], n: int) -> list[tuple[str, int]]` qui lit des lignes de journal au format Caddy/Nginx combiné (l’IP est le premier champ) et renvoie les `n` IP les plus fréquentes, par nombre décroissant puis IP croissante. Les lignes vides ou sans IP valide sont ignorées.

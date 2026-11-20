@@ -1,24 +1,36 @@
 #!/usr/bin/env bash
-# hibou — bundle hors ligne : téléchargement, vérification, installation.
+# hibou — bundle hors ligne.
+#   Machine connectée : « hibou telecharger » pose les questions, puis prépare le bundle.
+#   Infrastructure isolée : « hibou installer <rôle> » sur l’hôte Proxmox, tout est automatique.
 # Local. Isolé. Discret.
 set -euo pipefail
 
-VERSION_HIBOU="0.1.0"
+VERSION_HIBOU="0.9.0"
+
+ICI_HIBOU="$(dirname "$(readlink -f "$0")")"
+# Réponses du menu (non secrètes), posées à côté du script dans le bundle.
+# shellcheck disable=SC1091
+[[ -f "$ICI_HIBOU/config.env" ]] && source "$ICI_HIBOU/config.env"
 
 # ─── Réglages (à relire avant chaque bundle) ────────────────────────────────
 DOMAINE="${HIBOU_DOMAINE:-hibou.lan}"
 UBUNTU_SUITE="resolute"            # Ubuntu 26.04
+UBUNTU_VERSION="26.04"
 DEBIAN_SUITE="trixie"              # Debian 13, base de Proxmox VE 9
-NVIDIA_BRANCHE="580"               # à vérifier : branche prise en charge par Ada ET Turing, présente pour ubuntu2604 et debian13
+NVIDIA_VERSION="620.70.06"         # version exacte, la même dans les VM doc et dev
 NVIDIA_UBUNTU="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2604/x86_64"
-NVIDIA_DEBIAN="https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64"
 NVIDIA_CTK="https://nvidia.github.io/libnvidia-container/stable/deb/amd64"
+IMAGE_CLOUD="ubuntu-${UBUNTU_VERSION}-server-cloudimg-amd64.img"
+IMAGE_CLOUD_URL="https://cloud-images.ubuntu.com/releases/${UBUNTU_VERSION}/release"
 
-# Paquets : à vérifier sur les dépôts au moment du téléchargement.
+# openssh-server est embarqué avec le client : sinon apt retire le serveur en mettant le client à jour.
 PAQUETS_UBUNTU="docker-ce docker-ce-cli containerd.io docker-compose-plugin nvidia-container-toolkit \
-nvidia-driver-${NVIDIA_BRANCHE}-open nvidia-utils-${NVIDIA_BRANCHE} libnvidia-compute-${NVIDIA_BRANCHE} \
-chrony zstd jq rsync"
-PAQUETS_PVE="proxmox-default-headers nvidia-open nvidia-persistenced zstd jq rsync"
+chrony dnsmasq curl git openssh-client openssh-server zstd jq rsync nftables cloud-guest-utils qemu-guest-agent"
+# VM doc et dev : pilote complet compilé par DKMS pour le noyau générique à jour.
+PAQUETS_GPU="nvidia-open build-essential dkms linux-generic linux-headers-generic"
+# Hôtes Proxmox : plus de pilote NVIDIA, les cartes partent entières dans les VM (vfio-pci).
+PAQUETS_PVE="prometheus-node-exporter smartmontools ethtool zstd jq rsync"
+SMARTCTL_EXPORTER="0.14.0"         # absent de Debian 13 : binaire officiel pris sur GitHub
 
 # Images : le tag sert au téléchargement, l’empreinte (digest) est figée dans MANIFEST.md.
 declare -A IMAGES=(
@@ -27,39 +39,149 @@ declare -A IMAGES=(
   [forgejo]="codeberg.org/forgejo/forgejo:13"
   [caddy]="docker.io/library/caddy:2"
   [registry]="docker.io/library/registry:2"
+  [oauth2-proxy]="quay.io/oauth2-proxy/oauth2-proxy:v7.12.0"   # à vérifier : dernière v7 stable
+  [forgejo-runner]="code.forgejo.org/forgejo/runner:11"          # à vérifier : dernière version majeure
+  [prometheus]="quay.io/prometheus/prometheus:v3.5.0"
+  [alertmanager]="quay.io/prometheus/alertmanager:v0.28.1"
+  [grafana]="docker.io/grafana/grafana-oss:12.1.0"
+  [uptime-kuma]="docker.io/louislam/uptime-kuma:2"
+  [ntfy]="docker.io/binwiederhier/ntfy:v2.13.0"
+  [node-exporter]="quay.io/prometheus/node-exporter:v1.9.1"
+  [gpu-exporter]="docker.io/utkuozdemir/nvidia_gpu_exporter:1.3.2"
 )
-OPENCODE_VERSION="latest"          # à figer après le premier test
+LOCALES="opencode docs-builder priorite comfyui miroir relecteur"   # images construites sur la machine connectée
+# OpenCode : version figée dans versions.lock au premier bundle (dernière publiée sur npm à ce moment-là).
+COMFY_BASE="pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime"   # à vérifier : CUDA 12.8 couvre Turing, Ampere, Ada et Blackwell
 declare -A ROLE_IMAGES=(
-  [dev]="llama-swap caddy opencode"
-  [doc]="llama-swap caddy open-webui"
-  [forge]="forgejo caddy registry"
+  [dev]="llama-swap priorite node-exporter gpu-exporter"
+  [doc]="llama-swap priorite node-exporter gpu-exporter"
+  [forge]="forgejo caddy registry forgejo-runner docs-builder open-webui opencode oauth2-proxy relecteur prometheus alertmanager grafana uptime-kuma ntfy node-exporter"
 )
+CAPACITE_SUPPORT_GO="${HIBOU_SUPPORT_GO:-512}"
 
-# Modèles : alias | dépôt Hugging Face | motif des fichiers | rôle
-MODELES=(
-  "qwen3.8-27b-q8|unsloth/Qwen3.8-27B-GGUF|*UD-Q8_K_XL*,*mmproj*F16*|dev"
-  "qwen3-coder-next|unsloth/Qwen3-Coder-Next-GGUF|*UD-Q4_K_XL*|dev"
-  "qwen2.5-coder-7b|Qwen/Qwen2.5-Coder-7B-Instruct-GGUF|*q8_0*|dev"
-  "gemma-4-26b|unsloth/gemma-4-26B-A4B-it-GGUF|*UD-Q6_K_XL*,*mmproj*F16*|doc"
-  "qwen3.8-27b-q4|unsloth/Qwen3.8-27B-GGUF|*UD-Q4_K_XL*,*mmproj*F16*|doc"
-  "qwen3-embedding|Qwen/Qwen3-Embedding-0.6B-GGUF|*Q8_0*|doc"
-)
-CAPACITE_SUPPORT_GO=256
+# Cartes proposées au menu : nom tel que nvidia-smi l’affiche | mémoire (Go).
+GPUS=("RTX 6000 Ada|48" "RTX PRO 6000 Blackwell|96" "L40S|48" "RTX A6000|48" "RTX 5000 Ada|32"
+      "RTX 4000 Ada|20" "RTX A4000|16" "RTX A2000 12GB|12" "Quadro RTX 4000|8" "RTX A400|4")
+
+# ─── Profils de modèles ─────────────────────────────────────────────────────
+# alias|dépôt Hugging Face|motifs|contexte|arguments llama-server
+# Un seul utilisateur par serveur : -np 1 donne tout le contexte à la requête en cours,
+# et le cache KV en q8_0 divise sa taille par deux. Tailles approchées, à valider avec hibou-eval.
+PROFILS_DEV=("≥ 90 Go : Qwen3-Coder-Next Q6 (256k) ou Qwen3.8 27B Q8 (128k), complétion 7B toujours chargée"
+             "≥ 48 Go : Qwen3-Coder-Next Q4 (64k) ou Qwen3.8 27B Q8 (128k) + complétion 7B"
+             "≥ 24 Go : Qwen3.8 27B Q4 (64k) + complétion 3B"
+             "≥ 12 Go : Qwen3.5 9B Q4 (64k) + complétion 1.5B"
+             "≥ 4 Go : Qwen3.5 4B Q4 (16k) + complétion 1.5B")
+PROFILS_DEV_GO=(90 48 24 12 4)
+PROFILS_DOC=("≥ 48 Go : Gemma 4 26B Q8 (128k) ou Qwen3.8 27B Q8 (128k), vision, embeddings"
+             "≥ 24 Go : Gemma 4 26B Q6 (64k) ou Qwen3.8 27B Q4 (32k), vision, embeddings"
+             "≥ 12 Go : Qwen3.5 9B Q4 (32k), embeddings"
+             "≥ 4 Go : Qwen3.5 4B Q4 (8k), vision, embeddings sur le processeur")
+PROFILS_DOC_GO=(48 24 12 4)
+
+profil() {  # rôle numéro → MODELES_ROLE, GROUPES, PRINCIPAL
+  local emb="qwen3-embedding|Qwen/Qwen3-Embedding-0.6B-GGUF|*Q8_0*|8192|-ngl 0 --embedding --pooling last"
+  local rag="  rag: { persistent: true, swap: false, exclusive: false, members: [qwen3-embedding] }"
+  case "$1:$2" in
+    dev:1) MODELES_ROLE=(
+        "qwen3-coder-next|unsloth/Qwen3-Coder-Next-GGUF|*UD-Q6_K_XL*|262144|--cache-reuse 256"
+        "qwen3.8-27b|unsloth/Qwen3.8-27B-GGUF|*UD-Q8_K_XL*,*mmproj*F16*|131072|--cache-reuse 256"
+        "fim|Qwen/Qwen2.5-Coder-7B-Instruct-GGUF|*q8_0*|16384|")
+      GROUPES="  principal: { swap: true, exclusive: false, members: [qwen3-coder-next, qwen3.8-27b] }
+  completion: { persistent: true, swap: false, exclusive: false, members: [fim] }" ;;
+    dev:2) MODELES_ROLE=(
+        "qwen3-coder-next|unsloth/Qwen3-Coder-Next-GGUF|*UD-Q4_K_XL*|65536|--cache-reuse 256"
+        "qwen3.8-27b|unsloth/Qwen3.8-27B-GGUF|*UD-Q8_K_XL*,*mmproj*F16*|131072|--cache-reuse 256"
+        "fim|Qwen/Qwen2.5-Coder-7B-Instruct-GGUF|*q8_0*|8192|")
+      GROUPES="  code: { swap: false, exclusive: true, members: [qwen3.8-27b, fim] }" ;;
+    dev:3) MODELES_ROLE=(
+        "qwen3.8-27b|unsloth/Qwen3.8-27B-GGUF|*UD-Q4_K_XL*,*mmproj*F16*|65536|--cache-reuse 256"
+        "fim|ggml-org/Qwen2.5-Coder-3B-Q8_0-GGUF|*q8_0*|8192|")
+      GROUPES="  code: { swap: false, exclusive: true, members: [qwen3.8-27b, fim] }" ;;
+    dev:4) MODELES_ROLE=(
+        "qwen3.5-9b|unsloth/Qwen3.5-9B-GGUF|*UD-Q4_K_XL*|65536|--cache-reuse 256"
+        "fim|ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF|*q8_0*|8192|")
+      GROUPES="  code: { swap: false, exclusive: true, members: [qwen3.5-9b, fim] }" ;;
+    dev:5) MODELES_ROLE=(
+        "qwen3.5-4b|unsloth/Qwen3.5-4B-GGUF|*UD-Q4_K_XL*|16384|--cache-reuse 256"
+        "fim|ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF|*q8_0*|4096|")
+      GROUPES="  code: { swap: false, exclusive: true, members: [qwen3.5-4b, fim] }" ;;
+    doc:1) MODELES_ROLE=(
+        "gemma-4-26b|unsloth/gemma-4-26B-A4B-it-GGUF|*UD-Q8_K_XL*,*mmproj*F16*|131072|"
+        "qwen3.8-27b|unsloth/Qwen3.8-27B-GGUF|*UD-Q8_K_XL*,*mmproj*F16*|131072|" "$emb")
+      GROUPES="$rag" ;;
+    doc:2) MODELES_ROLE=(
+        "gemma-4-26b|unsloth/gemma-4-26B-A4B-it-GGUF|*UD-Q6_K_XL*,*mmproj*F16*|65536|"
+        "qwen3.8-27b|unsloth/Qwen3.8-27B-GGUF|*UD-Q4_K_XL*,*mmproj*F16*|32768|" "$emb")
+      GROUPES="$rag" ;;
+    doc:3) MODELES_ROLE=("qwen3.5-9b|unsloth/Qwen3.5-9B-GGUF|*UD-Q4_K_XL*|32768|" "$emb")
+      GROUPES="$rag" ;;
+    doc:4) MODELES_ROLE=("qwen3.5-4b|unsloth/Qwen3.5-4B-GGUF|*UD-Q4_K_XL*,*mmproj*F16*|8192|" "$emb")
+      GROUPES="$rag" ;;
+    *) erreur "Profil inconnu : $1 $2." ;;
+  esac
+  PRINCIPAL="${MODELES_ROLE[0]%%|*}"
+  # Décodage spéculatif sur dev : un petit modèle de la même famille propose les tokens, le 27B dense les valide.
+  # Le projecteur de vision est retiré du 27B de dev (llama-server ne combine pas vision et ébauche) ; la vision reste sur doc.
+  if [[ "$1" == dev && "${HIBOU_SPECULATIF:-0}" == 1 ]]; then
+    local i a d m c x
+    for i in "${!MODELES_ROLE[@]}"; do
+      IFS='|' read -r a d m c x <<< "${MODELES_ROLE[i]}"
+      [[ "$a" == qwen3.8-27b ]] && MODELES_ROLE[i]="$a|$d|${m%,\*mmproj*}|$c|$x @ebauche"
+    done
+    MODELES_ROLE+=("ebauche|$EBAUCHE_DEPOT|$EBAUCHE_MOTIF|0|@fichier")
+  fi
+}
+# Modèle d’ébauche : même tokenizer que la famille Qwen3.x. À vérifier au premier bundle ; si llama-server
+# refuse la paire, l’installation retire l’ébauche d’elle-même (verifier_speculatif).
+EBAUCHE_DEPOT="unsloth/Qwen3.5-0.8B-GGUF"
+EBAUCHE_MOTIF="*Q8_0*"
+ARGS_EBAUCHE="-md /models/%s -ngld 99 --draft-max 16 --draft-min 1"
+servi() { [[ "$1" != *@fichier* ]]; }   # les fichiers d’ébauche ne sont pas des modèles exposés
+
+# Génération d’images : checkpoint selon la mémoire de la carte dédiée.
+modele_image() {  # Go → "dépôt|fichier|taille|arguments ComfyUI"
+  if (( $1 >= 8 )); then echo "stabilityai/stable-diffusion-xl-base-1.0|sd_xl_base_1.0.safetensors|1024x1024|"
+  else echo "stable-diffusion-v1-5/stable-diffusion-v1-5|v1-5-pruned-emaonly.safetensors|512x512|--lowvram"; fi
+}
+
+images_du_role() {
+  local l="${ROLE_IMAGES[$1]}"
+  [[ "$1" == doc && "${HIBOU_IMG_NB:-0}" != 0 ]] && l+=" comfyui"
+  [[ "$1" == forge && "${HIBOU_MIROIR:-0}" == 1 ]] && l+=" miroir"
+  echo "$l"
+}
+modeles_du_role() {
+  local n="HIBOU_PROFIL_${1^^}" ligne
+  [[ "$1" == forge ]] && return 0
+  profil "$1" "${!n}"
+  for ligne in "${MODELES_ROLE[@]}"; do echo "${ligne%%|*}"; done
+  [[ "$1" == doc && "${HIBOU_IMG_NB:-0}" != 0 ]] && echo comfy
+  return 0
+}
 
 # ─── Charte Hibou dans le terminal ──────────────────────────────────────────
-# Jetons de marque en vraies couleurs ; aligner sur tokens.css si les teintes diffèrent.
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
-  AMBRE=$'\e[38;2;242;169;59m'; BRUME=$'\e[38;2;230;232;239m'
-  PIERRE=$'\e[38;2;154;160;173m'; DANGER=$'\e[38;2;229;107;92m'
-  SUCCES=$'\e[38;2;120;196;150m'; GRAS=$'\e[1m'; FIN=$'\e[0m'
+  # Jetons de hibou-jetons.css : ambre F2B544, brume E9E4D8, pierre 8A93A6, danger F0876B, succès 5CC8B8.
+  AMBRE=$'\e[38;2;242;181;68m'; BRUME=$'\e[38;2;233;228;216m'
+  PIERRE=$'\e[38;2;138;147;166m'; DANGER=$'\e[38;2;240;135;107m'
+  SUCCES=$'\e[38;2;92;200;184m'; GRAS=$'\e[1m'; FIN=$'\e[0m'
 else
   AMBRE=""; BRUME=""; PIERRE=""; DANGER=""; SUCCES=""; GRAS=""; FIN=""
 fi
 
 symbole() {
-  printf '%s   /\\_/\\%s\n' "$BRUME" "$FIN"
-  printf '%s  ( %so%s %so%s )%s   %sHibou%s %s%s%s\n' "$BRUME" "$AMBRE" "$BRUME" "$AMBRE" "$BRUME" "$FIN" "$GRAS$BRUME" "$FIN" "$PIERRE" "$VERSION_HIBOU" "$FIN"
-  printf '%s   > ^ <%s    %sL’IA qui veille chez vous.%s\n\n' "$BRUME" "$FIN" "$PIERRE" "$FIN"
+  local l1='                  , _ ,'
+  local l3="                /'\` ' \`'\\"
+  local l4="                |'''''''|"
+  local l5="                |\\\\'''//|"
+  local l6='                   """'
+  printf '%s%s%s\n' "$BRUME" "$l1" "$FIN"
+  printf '%s                 ( %so%s %so%s )%s     %sHibou%s %s%s%s\n' "$BRUME" "$AMBRE" "$BRUME" "$AMBRE" "$BRUME" "$FIN" "$GRAS$BRUME" "$FIN" "$PIERRE" "$VERSION_HIBOU" "$FIN"
+  printf '%s%s%s     %sL’IA qui veille chez vous.%s\n' "$BRUME" "$l3" "$FIN" "$PIERRE" "$FIN"
+  printf '%s%s%s\n' "$BRUME" "$l4" "$FIN"
+  printf '%s%s%s\n' "$BRUME" "$l5" "$FIN"
+  printf '%s%s%s\n\n' "$BRUME" "$l6" "$FIN"
 }
 etape()  { printf '\n%s%s%s %s%s%s\n' "$AMBRE" "▸" "$FIN" "$GRAS$BRUME" "$*" "$FIN"; }
 dire()   { printf '  %s%s%s\n' "$BRUME" "$*" "$FIN"; }
@@ -69,61 +191,653 @@ erreur() { printf '\n  %sErreur%s  %s\n' "$DANGER" "$FIN" "$1" >&2; [[ -n "${2:-
 
 exiger_root() { [[ $EUID -eq 0 ]] || erreur "Il me faut les droits administrateur." "Relance avec sudo."; }
 exiger_cmd()  { command -v "$1" >/dev/null || erreur "La commande $1 est absente." "${2:-Installe-la puis relance.}"; }
+cle() { head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40; }
 
-# ─── Téléchargement (VM connectée) ──────────────────────────────────────────
+# ─── Questions (machine connectée uniquement) ───────────────────────────────
+demander() {  # variable question défaut [regex]
+  local _r
+  while :; do
+    read -rp "  $2${3:+ [$3]} : " _r; _r="${_r:-$3}"
+    [[ -z "${4:-}" || "$_r" =~ $4 ]] && break
+    note "Valeur refusée."
+  done
+  printf -v "$1" '%s' "$_r"
+}
+demander_mdp() {  # variable libellé
+  local a b
+  while :; do
+    read -rsp "  $2 : " a; echo; read -rsp "  Confirme : " b; echo
+    [[ "$a" == "$b" ]] || { note "Les deux saisies diffèrent."; continue; }
+    (( ${#a} >= 12 )) || { note "12 caractères minimum."; continue; }
+    # Les mots de passe passent dans du JSON et des fichiers d’environnement.
+    [[ "$a" != *[\'\"\\\$\`\ ]* ]] || { note "Évite les espaces et ' \" \\ \$ \`."; continue; }
+    printf -v "$1" '%s' "$a"; return
+  done
+}
+choisir() {  # variable question défaut options...
+  local _i=1 _o _r _n=$(($# - 3))
+  printf '  %s\n' "$2"
+  for _o in "${@:4}"; do printf '    %s%d%s  %s\n' "$AMBRE" "$_i" "$FIN" "$_o"; _i=$((_i + 1)); done
+  while :; do read -rp "  Choix [$3] : " _r; _r="${_r:-$3}"; [[ "$_r" =~ ^[0-9]+$ ]] && (( _r >= 1 && _r <= _n )) && break; done
+  printf -v "$1" '%s' "$_r"
+}
+RE_IP='^([0-9]{1,3}\.){3}[0-9]{1,3}$'
+
+choisir_gpu() {  # préfixe libellé → <préfixe>_GPU, _GO, _NB
+  local libs=() g c nom go nb
+  for g in "${GPUS[@]}"; do libs+=("${g%|*} (${g#*|} Go)"); done
+  choisir c "$2 : quelle carte ?" 1 "${libs[@]}" "Autre"
+  if (( c <= ${#GPUS[@]} )); then nom="${GPUS[c-1]%|*}"; go="${GPUS[c-1]#*|}"
+  else demander nom "Nom exact affiché par nvidia-smi (sans « NVIDIA »)" "" '.+'; demander go "Mémoire par carte (Go)" "" '^[0-9]+$'; fi
+  demander nb "Nombre de cartes" 1 '^[1-8]$'
+  printf -v "${1}_GPU" '%s' "$nom"; printf -v "${1}_GO" '%s' "$go"; printf -v "${1}_NB" '%s' "$nb"
+}
+choisir_profil() {  # rôle Go_disponibles → HIBOU_PROFIL_<RÔLE>
+  local -n libs="PROFILS_${1^^}" seuils="PROFILS_${1^^}_GO"
+  local i defaut=${#seuils[@]} p
+  for i in "${!seuils[@]}"; do (( $2 >= seuils[i] )) && { defaut=$((i + 1)); break; }; done
+  (( $2 >= seuils[-1] )) || note "Attention : $2 Go est sous le plus petit profil (${seuils[-1]} Go)."
+  choisir p "Modèles du serveur $1 ($2 Go de mémoire GPU pour le LLM)" "$defaut" "${libs[@]}"
+  printf -v "HIBOU_PROFIL_${1^^}" '%s' "$p"
+}
+
+listes_miroir() {  # dossier : modèles de listes, jamais écrasés
+  install -d "$1"
+  local f
+  declare -A ex=(
+    [requirements.txt]=$'# Paquets Python, syntaxe pip. Exemples :\n# requests\n# fastapi==0.115.*\n# -r autre-liste.txt\n'
+    [npm-packages.txt]=$'# Paquets npm, nom ou nom@version. Exemples :\n# typescript\n# vite@6\n'
+    [git-repos.txt]=$'# Dépôts git copiés dans l’organisation hibou. Exemple :\n# https://github.com/ggml-org/llama.cpp.git\n'
+    [docker-images.txt]=$'# Images Docker copiées dans le registre de Forgejo. Exemples :\n# python:3.12-slim\n# postgres:17\n')
+  for f in "${!ex[@]}"; do [[ -f "$1/$f" ]] || printf '%s' "${ex[$f]}" > "$1/$f"; done
+}
+
+choisir_materiel() {
+  etape "Serveur dev"
+  choisir_gpu DEV "Serveur dev"
+  HIBOU_DEV_GPU="$DEV_GPU" HIBOU_DEV_GO="$DEV_GO" HIBOU_DEV_NB="$DEV_NB"
+  choisir_profil dev $((DEV_GO * DEV_NB))
+  HIBOU_SPECULATIF=0
+  if (( HIBOU_PROFIL_DEV <= 3 )); then
+    local sp; choisir sp "Décodage spéculatif pour Qwen3.8 27B (plus rapide en code ; sa vision passe sur doc) ?" 2 "Non" "Oui"
+    HIBOU_SPECULATIF=$((sp - 1))
+  fi
+
+  etape "Serveur doc"
+  choisir_gpu DOC "Serveur doc (LLM)"
+  HIBOU_DOC_GPU="$DOC_GPU" HIBOU_DOC_GO="$DOC_GO" HIBOU_DOC_NB="$DOC_NB"
+  local img; choisir img "Génération d’images (ComfyUI) sur une carte à part ?" 1 "Non" "Oui, une carte dédiée en plus" "Oui, en prenant une des cartes du LLM"
+  HIBOU_IMG_NB=0 HIBOU_IMG_GPU="" HIBOU_IMG_GO=0
+  case "$img" in
+    2) choisir_gpu IMG "Carte d’images"; HIBOU_IMG_GPU="$IMG_GPU" HIBOU_IMG_GO="$IMG_GO" HIBOU_IMG_NB=1 ;;
+    3) (( DOC_NB > 1 )) || erreur "Il faut au moins deux cartes pour en prendre une." "Relance et choisis une carte dédiée."
+       HIBOU_IMG_GPU="$DOC_GPU" HIBOU_IMG_GO="$DOC_GO" HIBOU_IMG_NB=1; HIBOU_DOC_NB=$((DOC_NB - 1)) ;;
+  esac
+  (( HIBOU_IMG_NB == 0 || HIBOU_IMG_GO >= 8 )) || note "Moins de 8 Go : Stable Diffusion 1.5 en mode basse mémoire. Une RTX A2000 12 Go permet SDXL."
+  choisir_profil doc $((HIBOU_DOC_GO * HIBOU_DOC_NB))
+}
+
+ecrire_config() {  # dossier
+  local v
+  { echo "# Réponses du menu Hibou $VERSION_HIBOU ($(date +%F)). Rien de secret ici."
+    for v in DOMAINE RESEAU PASSERELLE PONT VLAN IP_FORGE IP_DOC IP_DEV IP_PVE_DOC IP_PVE_DEV IP_CLUSTER \
+             VMID_FORGE VMID_DOC VMID_DEV DISQUE_FORGE DISQUE_DOC DISQUE_DEV RAM_FORGE CPU_FORGE STOCKAGE STOCKAGE_SAUVEGARDE \
+             DEV_GPU DEV_GO DEV_NB DOC_GPU DOC_GO DOC_NB IMG_GPU IMG_GO IMG_NB PROFIL_DEV PROFIL_DOC SPECULATIF MIROIR PY_VERSIONS; do
+      v="HIBOU_$v"; printf '%s=%q\n' "$v" "${!v:-}"
+    done
+  } > "$1/config.env"
+}
+
+configurer_bundle() {  # dossier
+  local s="$1"
+  if [[ -f "$s/config.env" && -f "$s/secrets.chiffre" ]]; then
+    local garde; choisir garde "Ce bundle a déjà une configuration." 1 "La garder" "Changer seulement les cartes et les modèles" "Tout refaire"
+    # shellcheck disable=SC1091
+    [[ "$garde" == 1 ]] && { source "$s/config.env"; return 0; }   # sinon HIBOU_DOMAINE etc. restent vides
+    if [[ "$garde" == 2 ]]; then
+      # shellcheck disable=SC1091
+      source "$s/config.env"; choisir_materiel; ecrire_config "$s"
+      fait "Cartes et modèles mis à jour ; comptes, mots de passe et clés inchangés."; return 0
+    fi
+  fi
+  etape "Réseau"
+  demander HIBOU_DOMAINE "Domaine interne" "hibou.lan" '^[a-z0-9.-]+$'
+  demander HIBOU_RESEAU "Réseau (CIDR)" "192.168.10.0/24" '^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$'
+  demander HIBOU_PASSERELLE "Passerelle (vide s’il n’y en a pas)" "" '^(([0-9]{1,3}\.){3}[0-9]{1,3})?$'
+  demander HIBOU_PONT "Pont Proxmox des VM" "vmbr0" '^[a-z0-9]+$'
+  demander HIBOU_VLAN "VLAN des VM (vide = aucun)" "" '^[0-9]*$'
+  demander HIBOU_IP_FORGE "Adresse de la VM forge (applications, sur le cluster)" "" "$RE_IP"
+  demander HIBOU_IP_DOC "Adresse de la VM doc" "" "$RE_IP"
+  demander HIBOU_IP_DEV "Adresse de la VM dev" "" "$RE_IP"
+  demander HIBOU_IP_PVE_DOC "Adresse de l’hôte Proxmox R730 doc" "" "$RE_IP"
+  demander HIBOU_IP_PVE_DEV "Adresse de l’hôte Proxmox R730 dev" "" "$RE_IP"
+  demander HIBOU_IP_CLUSTER "Adresses des nœuds du cluster à superviser (séparées par des espaces)" "" '^[0-9. ]*$'
+
+  etape "Machines virtuelles"
+  demander HIBOU_VMID_FORGE "Numéro de la VM forge" 210 '^[0-9]+$'
+  demander HIBOU_VMID_DOC "Numéro de la VM doc" 220 '^[0-9]+$'
+  demander HIBOU_VMID_DEV "Numéro de la VM dev" 230 '^[0-9]+$'
+  demander HIBOU_DISQUE_FORGE "Disque de forge (Go)" 200 '^[0-9]+$'
+  demander HIBOU_DISQUE_DOC "Disque de doc (Go)" 400 '^[0-9]+$'
+  demander HIBOU_DISQUE_DEV "Disque de dev (Go)" 600 '^[0-9]+$'
+  demander HIBOU_RAM_FORGE "Mémoire de forge (Go)" 32 '^[0-9]+$'
+  demander HIBOU_CPU_FORGE "Cœurs de forge" 8 '^[0-9]+$'
+  note "doc et dev prennent toute la mémoire et tous les cœurs de leur R730, moins 16 Go et 4 fils pour Proxmox."
+  demander HIBOU_STOCKAGE "Stockage Proxmox des disques (vide = celui qui a le plus de place)" "" '^[A-Za-z0-9_-]*$'
+  note "Sauvegarde de forge obligatoire : comptes, dépôts, conversations, documentation, supervision."
+  note "Choisis un stockage sur d’autres disques que la VM (Proxmox Backup Server, NFS, disque dédié)."
+  demander HIBOU_STOCKAGE_SAUVEGARDE "Stockage Proxmox des sauvegardes de forge" "" '^[A-Za-z0-9_-]+$'
+
+  choisir_materiel
+
+  etape "Miroir de dépendances (pip, npm, git, images Docker)"
+  note "Ces paquets sont copiés dans Forgejo pour développer sans Internet."
+  local mir; choisir mir "Préparer un miroir ?" 2 "Non" "Oui"
+  HIBOU_MIROIR=$((mir - 1)) HIBOU_PY_VERSIONS=""
+  if (( HIBOU_MIROIR )); then
+    demander HIBOU_PY_VERSIONS "Versions de Python à couvrir" "3.11 3.12 3.13" '^[0-9. ]+$'
+    listes_miroir "$s/miroir.d"
+    dire "Remplis les listes dans $s/miroir.d (une entrée par ligne), puis appuie sur Entrée."
+    read -r _
+  fi
+
+  etape "Administrateur (Forgejo, Open WebUI, Grafana)"
+  demander HIBOU_ADMIN_NOM "Identifiant" "hibou-admin" '^[a-z][a-z0-9-]{2,30}$'
+  demander HIBOU_ADMIN_MAIL "Adresse électronique" "$HIBOU_ADMIN_NOM@$HIBOU_DOMAINE" '^[^@ ]+@[^@ ]+$'
+  demander_mdp HIBOU_ADMIN_MDP "Mot de passe"
+  demander_mdp HIBOU_VM_MDP "Mot de passe du compte « hibou » des VM (console Proxmox)"
+
+  etape "Utilisateurs, du plus prioritaire au moins prioritaire"
+  note "Si deux personnes interrogent le même serveur en même temps, la première de la liste passe devant."
+  note "L’autre attend la fin de la réponse en cours, rien n’est interrompu."
+  HIBOU_UTILISATEURS=()
+  local nom mail eq mdp
+  while :; do
+    demander nom "Identifiant n° $(( ${#HIBOU_UTILISATEURS[@]} + 1 )) (vide pour terminer)" "" '^([a-z][a-z0-9-]{1,30})?$'
+    if [[ -z "$nom" ]]; then (( ${#HIBOU_UTILISATEURS[@]} )) && break; note "Il faut au moins un utilisateur."; continue; fi
+    demander mail "Adresse électronique de $nom" "$nom@$HIBOU_DOMAINE" '^[^@ ]+@[^@ ]+$'
+    choisir eq "Serveurs de $nom" 3 "doc" "dev" "doc et dev"
+    demander_mdp mdp "Mot de passe initial de $nom (à changer à la première connexion)"
+    HIBOU_UTILISATEURS+=("$nom|${mail,,}|$mdp|$(case $eq in 1) echo doc;; 2) echo dev;; *) echo doc,dev;; esac)|$(cle)")
+  done
+
+  etape "Phrase de passe du bundle"
+  note "Elle chiffre les mots de passe et les clés. Elle sera demandée une seule fois par installation."
+  local phrase; demander_mdp phrase "Phrase de passe"
+
+  ecrire_config "$s"
+
+  local tmp; tmp=$(mktemp -d)
+  ssh-keygen -q -t ed25519 -N '' -C "hibou@$HIBOU_DOMAINE" -f "$tmp/vm"
+  ssh-keygen -q -t ed25519 -N '' -C "hibou-dev@$HIBOU_DOMAINE" -f "$tmp/agent"
+  HIBOU_SSH_VM_B64=$(base64 -w0 < "$tmp/vm"); HIBOU_SSH_VM_PUB=$(cat "$tmp/vm.pub")
+  HIBOU_SSH_AGENT_B64=$(base64 -w0 < "$tmp/agent")
+  HIBOU_CLE_WEBUI=$(cle); HIBOU_CLE_OPENCODE=$(cle); HIBOU_CLE_RELECTEUR=$(cle)
+  rm -rf "$tmp"
+  # declare -g : les variables restent globales quand « secrets » les relit dans une fonction.
+  declare -p HIBOU_ADMIN_NOM HIBOU_ADMIN_MAIL HIBOU_ADMIN_MDP HIBOU_VM_MDP HIBOU_UTILISATEURS \
+             HIBOU_SSH_VM_B64 HIBOU_SSH_VM_PUB HIBOU_SSH_AGENT_B64 HIBOU_CLE_WEBUI HIBOU_CLE_OPENCODE HIBOU_CLE_RELECTEUR \
+    | sed -E 's/^declare -- /declare -g /; s/^declare -a /declare -ga /' \
+    | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -out "$s/secrets.chiffre" -pass fd:3 3<<<"$phrase"
+  fait "Configuration enregistrée : config.env (clair) et secrets.chiffre (chiffré)."
+  # shellcheck disable=SC1091
+  source "$s/config.env"
+}
+
+# ─── Téléchargement (machine connectée) ─────────────────────────────────────
+# HIBOU_PARTIES limite le téléchargement, ex. HIBOU_PARTIES=apt,extra pour ne refaire que les paquets.
+# ─── Versions figées ────────────────────────────────────────────────────────
+# versions.lock, dans le bundle : empreinte de chaque image, version d’OpenCode, commit de ComfyUI,
+# révision de chaque modèle. Un nouveau bundle reprend ces versions ; seul HIBOU_ACTUALISER les change.
+verrou_lire()  { awk -v n="$1" '$1==n {print $2}' "$SORTIE/versions.lock" 2>/dev/null; }
+verrou_ecrire() {
+  { grep -v "^$1 " "$SORTIE/versions.lock" 2>/dev/null || true; echo "$1 $2"; } | sort > "$SORTIE/versions.lock.tmp"
+  mv "$SORTIE/versions.lock.tmp" "$SORTIE/versions.lock"
+}
+actualiser() {  # clé : vrai si pas encore figée, ou si l’utilisateur l’a demandé
+  [[ -z "$(verrou_lire "$1")" || ",${HIBOU_ACTUALISER:-}," == *",tout,"* || ",${HIBOU_ACTUALISER:-}," == *",${1#*:},"* ]]
+}
+choisir_actualisation() {
+  [[ -f "$SORTIE/versions.lock" && -z "${HIBOU_ACTUALISER+x}" && -t 0 ]] || return 0
+  local a; choisir a "Versions des images, d’OpenCode, de ComfyUI et des modèles" 1 \
+    "Garder celles du bundle précédent" "Tout actualiser" "Choisir ce qu’il faut actualiser"
+  case "$a" in
+    2) HIBOU_ACTUALISER=tout ;;
+    3) note "Noms possibles : $(awk '{sub(/^[a-z]+:/,"",$1); print $1}' "$SORTIE/versions.lock" | sort -u | paste -sd' ')"
+       demander HIBOU_ACTUALISER "Noms séparés par des virgules" "" '^[A-Za-z0-9.,_-]*$' ;;
+    *) HIBOU_ACTUALISER="" ;;
+  esac
+}
+
+veut() { [[ ",${HIBOU_PARTIES:-apt,extra,images,modeles,miroir}," == *",$1,"* ]]; }
+
+# Une image dont l’identifiant n’a pas changé n’est pas réenregistrée : le fichier du bundle reste identique,
+# rien ne repart vers les VM à la mise à jour.
+enregistrer() {  # nom référence identifiant
+  local f="$SORTIE/images/$1.tar.zst" avant=""
+  # Premier passage : pas de digests.precedent. awk échouerait et set -e arrêterait le script sans message.
+  [[ -f "$SORTIE/images/digests.precedent" ]] && avant=$(awk -v n="$1" '$1==n {print $3}' "$SORTIE/images/digests.precedent")
+  if [[ -f "$f" && "$avant" == "$3" ]]; then note "$1 inchangée"
+  else docker save "$2" | zstd -q -f -T0 -10 -o "$f"; fi
+  echo "$1 $2 $3" >> "$SORTIE/images/digests.txt"
+}
+construire() {  # nom ; Dockerfile dans $CTX
+  # Identifiant = empreinte des entrées (contexte + image de base), pas l'Id de construction :
+  # le cache Docker n'est pas garanti, et une reconstruction identique changerait l'Id.
+  local base cle
+  base=$(awk 'toupper($1)=="FROM" {print $2; exit}' "$CTX/Dockerfile")
+  docker image inspect "$base" >/dev/null 2>&1 || docker pull -q "$base" >/dev/null
+  cle="sha256:$( { (cd "$CTX" && find . -type f -print0 | sort -z | xargs -0 sha256sum); docker image inspect -f '{{.Id}}' "$base"; } | sha256sum | cut -d' ' -f1)"
+  if [[ -f "$SORTIE/images/$1.tar.zst" && -f "$SORTIE/images/digests.precedent" ]] \
+     && awk -v n="$1" -v c="$cle" '$1==n && $3==c {t=1} END {exit !t}' "$SORTIE/images/digests.precedent"; then
+    enregistrer "$1" "hibou/$1:actuel" "$cle"; return
+  fi
+  docker build -q -t "hibou/$1:actuel" "$CTX" >/dev/null
+  enregistrer "$1" "hibou/$1:actuel" "$cle"
+}
+
+source_priorite() {
+cat <<'PY'
+"""hibou-priorite : file d’attente par priorité devant llama-swap.
+
+Une requête de génération à la fois par modèle. Quand une place se libère,
+l’utilisateur le mieux classé passe ; à rang égal, le premier arrivé.
+Rien n’est interrompu : la réponse en cours va à son terme.
+"""
+import asyncio, heapq, itertools, json, os, re, time
+from collections import defaultdict
+
+GARDE = ("/v1/chat/completions", "/v1/completions", "/v1/responses", "/v1/messages", "/completion", "/infill")
+compteur = itertools.count()
+
+
+class Porte:
+    def __init__(self):
+        self.occupe, self.file = False, []
+
+    async def prendre(self, rang):
+        if not self.occupe and not self.file:
+            self.occupe = True
+            return
+        fut = asyncio.get_running_loop().create_future()
+        heapq.heappush(self.file, (rang, next(compteur), fut))
+        try:
+            await fut
+        except asyncio.CancelledError:
+            if fut.done() and not fut.cancelled():  # la place venait d’être donnée : on la rend
+                self.rendre()
+            raise
+
+    def rendre(self):
+        while self.file:
+            fut = heapq.heappop(self.file)[2]
+            if not fut.done():
+                fut.set_result(None)
+                return
+        self.occupe = False
+
+
+TIMINGS = re.compile(rb'"timings"\s*:\s*(\{[^{}]*\})')
+
+
+def lire_timings(fin):
+    """Dernier objet « timings » de llama-server dans la fin d’une réponse (JSON ou flux SSE)."""
+    trouves = TIMINGS.findall(fin)
+    if not trouves:
+        return None
+    try:
+        return json.loads(trouves[-1])
+    except ValueError:
+        return None
+
+
+class Mesures:
+    """Compteurs au format Prometheus, écrits à la main : pas de dépendance en plus."""
+
+    def __init__(self, contextes):
+        self.contextes = contextes
+        self.compteurs = defaultdict(float)
+        self.jauges = {}
+
+    def ajouter(self, nom, valeur, **etiq):
+        self.compteurs[(nom, tuple(sorted(etiq.items())))] += valeur
+
+    def fixer(self, nom, valeur, **etiq):
+        self.jauges[(nom, tuple(sorted(etiq.items())))] = valeur
+
+    def texte(self, portes, charges):
+        lignes = []
+        def ecrire(nom, etiq, v):
+            e = ",".join(f'{k}="{str(x).replace(chr(34), "")}"' for k, x in etiq)
+            lignes.append(f"{nom}{{{e}}} {v}")
+        for (nom, etiq), v in sorted(self.compteurs.items()):
+            ecrire(nom, etiq, v)
+        for (nom, etiq), v in sorted(self.jauges.items()):
+            ecrire(nom, etiq, v)
+        for modele, p in portes.items():
+            ecrire("hibou_llm_en_attente", (("modele", modele),), len([f for f in p.file if not f[2].done()]))
+            ecrire("hibou_llm_en_cours", (("modele", modele),), int(p.occupe))
+        for modele, ctx in self.contextes.items():
+            ecrire("hibou_llm_contexte_max", (("modele", modele),), ctx)
+            ecrire("hibou_llm_charge", (("modele", modele),), int(modele in charges))
+        return "\n".join(lignes) + "\n"
+
+
+def servir():
+    from aiohttp import web, ClientSession, ClientTimeout
+
+    amont = os.environ.get("AMONT", "http://llama-swap:8080")
+    conf = json.load(open(os.environ.get("CONF", "/etc/hibou/priorite.json")))
+    defaut = len(conf["courriels"])
+    portes = {}
+    mesures = Mesures(conf.get("contextes", {}))
+    retirer = {"host", "content-length", "authorization", "transfer-encoding", "connection"}
+
+    def qui(req):
+        cle = req.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if cle in conf["cles"]:
+            return conf["cles"][cle]
+        if cle in conf["services"]:
+            s = conf["services"][cle]
+            mail = req.headers.get("X-OpenWebUI-User-Email", "").lower()
+            return conf["courriels"].get(mail, {"nom": mail or s["nom"], "rang": s["rang"]})
+        return None
+
+    async def relais(req):
+        corps = await req.read()
+        u = qui(req)
+        if req.path == "/metrics":  # port ouvert à forge seule (pare-feu de la VM)
+            charges = set()
+            try:
+                async with req.app["session"].get(amont + "/running") as r:
+                    charges = {m.get("model") for m in (await r.json(content_type=None)).get("running", [])}
+            except Exception:
+                pass
+            return web.Response(text=mesures.texte(portes, charges), content_type="text/plain")
+        if u is None and req.path != "/health":
+            return web.json_response({"error": {"message": "Clé d’API absente ou invalide."}}, status=401)
+        porte = None
+        if req.method == "POST" and req.path in GARDE:
+            try:
+                modele = json.loads(corps).get("model", "")
+            except (ValueError, AttributeError):
+                modele = ""
+            porte = portes.setdefault(modele, Porte())
+            attente = len(porte.file) + porte.occupe
+            if attente:
+                print(f"{u['nom']} (rang {u['rang']}) attend {modele} : {attente} devant ou en cours", flush=True)
+            debut = time.monotonic()
+            await porte.prendre(u["rang"])
+            attente = time.monotonic() - debut
+            mesures.ajouter("hibou_llm_requetes_total", 1, modele=modele, utilisateur=u["nom"])
+            mesures.ajouter("hibou_llm_attente_secondes_total", attente, modele=modele, utilisateur=u["nom"])
+            mesures.fixer("hibou_llm_attente_derniere_secondes", round(attente, 2), modele=modele)
+        fin = b""
+        try:
+            entetes = {k: v for k, v in req.headers.items() if k.lower() not in retirer}
+            async with req.app["session"].request(req.method, amont + req.path_qs, headers=entetes, data=corps) as r:
+                rep = web.StreamResponse(status=r.status, headers={
+                    k: v for k, v in r.headers.items()
+                    if k.lower() not in ("content-length", "transfer-encoding", "connection", "content-encoding")})
+                await rep.prepare(req)
+                async for bloc in r.content.iter_any():
+                    await rep.write(bloc)
+                    if porte:
+                        fin = (fin + bloc)[-65536:]
+                await rep.write_eof()
+                return rep
+        finally:
+            if porte:
+                porte.rendre()
+                t = lire_timings(fin)
+                if t:
+                    mesures.ajouter("hibou_llm_tokens_prompt_total", t.get("prompt_n", 0), modele=modele)
+                    mesures.ajouter("hibou_llm_tokens_generes_total", t.get("predicted_n", 0), modele=modele)
+                    mesures.ajouter("hibou_llm_generation_secondes_total", t.get("predicted_ms", 0) / 1000, modele=modele)
+                    mesures.ajouter("hibou_llm_prompt_secondes_total", t.get("prompt_ms", 0) / 1000, modele=modele)
+                    # Contexte occupé par la dernière requête : ce qui reste avant la troncature.
+                    mesures.fixer("hibou_llm_contexte_utilise", t.get("prompt_n", 0) + t.get("predicted_n", 0)
+                                  + t.get("cache_n", 0), modele=modele)
+
+    async def debut(app):
+        app["session"] = ClientSession(timeout=ClientTimeout(total=None), auto_decompress=False)
+
+    async def fin(app):
+        await app["session"].close()
+
+    app = web.Application(client_max_size=256 * 1024 * 1024)
+    app.on_startup.append(debut)
+    app.on_cleanup.append(fin)
+    app.router.add_route("*", "/{tail:.*}", relais)
+    # handler_cancellation : un client qui s’en va quitte aussi la file d’attente.
+    web.run_app(app, port=8080, handler_cancellation=True, access_log=None)
+
+
+async def _autotest():
+    p, ordre = Porte(), []
+    await p.prendre(9)
+
+    async def t(rang, nom):
+        await p.prendre(rang)
+        ordre.append(nom)
+        p.rendre()
+
+    taches = [asyncio.create_task(t(r, n)) for r, n in ((3, "c"), (0, "a"), (1, "b"), (0, "parti"))]
+    await asyncio.sleep(0)
+    taches[3].cancel()
+    await asyncio.sleep(0)
+    p.rendre()
+    await asyncio.gather(*taches[:3])
+    assert ordre == ["a", "b", "c"], ordre
+    assert not p.occupe and not p.file
+    flux = b'data: {"choices":[]}\n\ndata: {"choices":[],"timings":{"prompt_n":12,"predicted_n":30,"predicted_ms":600.0}}\n\ndata: [DONE]\n'
+    assert lire_timings(flux)["predicted_n"] == 30
+    assert lire_timings(b'{"id":1}') is None
+    m = Mesures({"x": 1024}); m.ajouter("hibou_llm_requetes_total", 1, modele="x", utilisateur="alice")
+    texte = m.texte({"x": Porte()}, {"x"})
+    assert 'hibou_llm_requetes_total{modele="x",utilisateur="alice"} 1.0' in texte and 'hibou_llm_charge{modele="x"} 1' in texte, texte
+    print("priorite : autotest réussi")
+
+
+if __name__ == "__main__":
+    asyncio.run(_autotest()) if os.environ.get("HIBOU_AUTOTEST") else servir()
+PY
+}
+
+source_relecteur() {
+cat <<'PY'
+"""hibou-relecteur : relit chaque pull request de l’organisation avec le LLM dev et poste un avis.
+
+Webhook d’organisation Forgejo (pull_request) -> diff -> LLM -> revue « commentaire ».
+L’avis est consultatif : il ne bloque ni n’approuve rien. Bibliothèque standard uniquement.
+"""
+import hashlib, hmac, json, os, threading, urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+LIMITE = int(os.environ.get("LIMITE_DIFF", "120000"))  # caractères ; au-delà, le diff est coupé
+CONSIGNE = (
+    "Tu es Hibou, relecteur de code. Tu écris en français, au tutoiement, calme et précis, sans point d’exclamation ni émoji. "
+    "Tu relis le diff d’une pull request. Signale uniquement les vrais problèmes : bogue, faille de sécurité, perte de données, "
+    "cas limite oublié, test manquant pour une logique risquée, code inutile ou trop compliqué. Pour chacun : "
+    "« **fichier:ligne** — gravité (bloquant, important, mineur) — le problème, puis la correction proposée ». "
+    "Pas de compliment, pas de résumé du diff. Si rien ne pose problème, réponds seulement : « Rien à signaler. »")
+en_cours, verrou = set(), threading.Lock()
+
+
+def signature_valide(secret, corps, recue):
+    attendue = hmac.new(secret.encode(), corps, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(attendue, (recue or "").strip())
+
+
+def couper(diff, limite=LIMITE):
+    if len(diff) <= limite:
+        return diff, False
+    return diff[:limite].rsplit("\n", 1)[0], True
+
+
+def http(methode, url, jeton=None, corps=None, cle=None):
+    entetes = {"Content-Type": "application/json"}
+    if jeton:
+        entetes["Authorization"] = f"token {jeton}"
+    if cle:
+        entetes["Authorization"] = f"Bearer {cle}"
+    req = urllib.request.Request(url, json.dumps(corps).encode() if corps is not None else None, entetes, method=methode)
+    with urllib.request.urlopen(req, timeout=1800) as r:
+        return r.read().decode()
+
+
+def relire(depot, numero, titre):
+    e = os.environ
+    api = f"{e['FORGEJO']}/api/v1/repos/{depot}/pulls/{numero}"
+    try:
+        diff, coupe = couper(http("GET", f"{api}.diff", e["JETON"]))
+        if not diff.strip():
+            return
+        rep = json.loads(http("POST", f"{e['LLM_URL']}/chat/completions", cle=e["LLM_CLE"], corps={
+            "model": e["MODELE"], "temperature": 0.2, "max_tokens": 4096,
+            "messages": [{"role": "system", "content": CONSIGNE},
+                         {"role": "user", "content": f"Pull request : {titre}\n\n```diff\n{diff}\n```"}]}))
+        avis = (rep["choices"][0]["message"].get("content") or "").strip() or "Rien à signaler."
+        if coupe:
+            avis += f"\n\n_Diff trop long : seuls les {LIMITE // 1000} premiers milliers de caractères ont été relus._"
+        avis += f"\n\n<sub>Relecture Hibou ({e['MODELE']}), consultative : la décision reste humaine.</sub>"
+        http("POST", f"{api}/reviews", e["JETON"], {"body": avis, "event": "COMMENT"})
+        print(f"{depot}#{numero} relue", flush=True)
+    except Exception as x:  # un échec ne doit jamais bloquer le webhook ni le serveur
+        print(f"{depot}#{numero} : échec de la relecture : {x}", flush=True)
+    finally:
+        with verrou:
+            en_cours.discard((depot, numero))
+
+
+class Webhook(BaseHTTPRequestHandler):
+    def do_POST(self):
+        corps = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if not signature_valide(os.environ["SECRET"], corps, self.headers.get("X-Forgejo-Signature") or self.headers.get("X-Gitea-Signature")):
+            self.send_response(401); self.end_headers(); return
+        self.send_response(202); self.end_headers()
+        ev = json.loads(corps or b"{}")
+        pr = ev.get("pull_request") or {}
+        if ev.get("action") not in ("opened", "reopened", "synchronized") or pr.get("draft"):
+            return
+        if (pr.get("user") or {}).get("login") == os.environ.get("COMPTE", "hibou-relecteur"):
+            return
+        cle = (ev["repository"]["full_name"], pr["number"])
+        with verrou:  # une seule relecture à la fois par pull request
+            if cle in en_cours:
+                return
+            en_cours.add(cle)
+        threading.Thread(target=relire, args=(*cle, pr.get("title", "")), daemon=True).start()
+
+    def log_message(self, *a):
+        pass
+
+
+def autotest():
+    s = hmac.new(b"k", b"{}", hashlib.sha256).hexdigest()
+    assert signature_valide("k", b"{}", s) and not signature_valide("k", b"{}", "0" * 64) and not signature_valide("k", b"{}", None)
+    d, c = couper("a\nb\nc", 3)
+    assert (d, c) == ("a", True) and couper("ab", 5) == ("ab", False)
+    print("relecteur : autotest réussi")
+
+
+if __name__ == "__main__":
+    if os.environ.get("HIBOU_AUTOTEST"):
+        autotest()
+    else:
+        ThreadingHTTPServer(("0.0.0.0", 8090), Webhook).serve_forever()
+PY
+}
+
 telecharger() {
-  local sortie="${1:-$PWD/hibou-bundle-$(date +%Y%m%d)}"
-  exiger_cmd docker "Installe Docker sur la VM de téléchargement."
-  exiger_cmd python3
-  mkdir -p "$sortie"/{apt/ubuntu,apt/pve,images,models,configs}
-  sortie="$(cd "$sortie" && pwd)"
-  dire "Je prépare le bundle dans $sortie."
+  SORTIE="${1:-$PWD/hibou-bundle-$(date +%Y%m%d)}"
+  exiger_cmd docker "Installe Docker sur la machine connectée."
+  exiger_cmd python3; exiger_cmd openssl; exiger_cmd zstd; exiger_cmd ssh-keygen
+  mkdir -p "$SORTIE"/{apt/ubuntu,apt/pve,images,models,extra}
+  SORTIE="$(cd "$SORTIE" && pwd)"
+  if [[ "$(findmnt -no TARGET -T "$SORTIE")" == "/" && -z "${HIBOU_FORCER:-}" ]]; then
+    erreur "Le dossier $SORTIE est sur le disque système, pas sur le disque USB." "Monte le disque (mount /dev/disk/by-label/HIBOU /mnt/hibou) puis relance. HIBOU_FORCER=1 pour passer outre."
+  fi
+  configurer_bundle "$SORTIE"
+  choisir_actualisation
+  DOMAINE="$HIBOU_DOMAINE"
+  local libre; libre=$(df --output=avail -BG "$SORTIE" | tail -1 | tr -dc 0-9)
+  (( libre >= 250 )) || note "Il reste ${libre} Go sur la destination ; prévois environ 250 Go."
+  dire "Je prépare le bundle dans $SORTIE."
 
-  etape "Paquets Ubuntu 26.04"
-  # Un conteneur vierge donne la fermeture complète des dépendances.
-  docker run --rm -v "$sortie/apt/ubuntu:/out" "ubuntu:26.04" bash -euc "
+  if veut apt; then
+  etape "Paquets Ubuntu $UBUNTU_VERSION"
+  # Fermeture complète : apt ignore ce que le conteneur a déjà, la cible peut être plus ancienne.
+  docker run --rm -v "$SORTIE/apt/ubuntu:/out" "ubuntu:$UBUNTU_VERSION" bash -euc "
+    export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq && apt-get install -y -qq ca-certificates curl gnupg dpkg-dev >/dev/null
     install -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     echo 'deb [signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $UBUNTU_SUITE stable' > /etc/apt/sources.list.d/docker.list
-    curl -fsSL $NVIDIA_UBUNTU/3bf863cc.pub | gpg --dearmor -o /etc/apt/keyrings/cuda.gpg
+    cle=\$(curl -fsSL $NVIDIA_UBUNTU/ | grep -oE '[0-9A-F]{8}\.pub' | sort -u | tail -1)
+    curl -fsSL $NVIDIA_UBUNTU/\$cle | gpg --dearmor -o /etc/apt/keyrings/cuda.gpg
     echo 'deb [signed-by=/etc/apt/keyrings/cuda.gpg] $NVIDIA_UBUNTU/ /' > /etc/apt/sources.list.d/cuda.list
     curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /etc/apt/keyrings/ctk.gpg
     echo 'deb [signed-by=/etc/apt/keyrings/ctk.gpg] $NVIDIA_CTK /' > /etc/apt/sources.list.d/ctk.list
     apt-get update -qq
-    apt-get install -y -qq --download-only --no-install-recommends $PAQUETS_UBUNTU
+    printf 'Package: *\nPin: version $NVIDIA_VERSION*\nPin-Priority: 1001\n' > /etc/apt/preferences.d/hibou-nvidia
+    rm -f /var/cache/apt/archives/*.deb; : > /tmp/vide
+    for lot in \"$PAQUETS_UBUNTU\" \"$PAQUETS_GPU\"; do
+      apt-get -o Dir::State::status=/tmp/vide install -y -qq --download-only --no-install-recommends \$lot
+    done
     cp /var/cache/apt/archives/*.deb /out/
     cd /out && dpkg-scanpackages -m . /dev/null 2>/dev/null | gzip -9 > Packages.gz"
-  fait "$(find "$sortie/apt/ubuntu" -name '*.deb' | wc -l) paquets Ubuntu."
+  fait "$(find "$SORTIE/apt/ubuntu" -name '*.deb' | wc -l) paquets Ubuntu."
 
   etape "Paquets Proxmox VE 9 (Debian 13)"
-  docker run --rm -v "$sortie/apt/pve:/out" "debian:$DEBIAN_SUITE" bash -euc "
-    apt-get update -qq && apt-get install -y -qq ca-certificates curl gnupg dpkg-dev >/dev/null
-    install -d /etc/apt/keyrings
-    curl -fsSL https://enterprise.proxmox.com/debian/proxmox-archive-keyring-$DEBIAN_SUITE.gpg -o /etc/apt/keyrings/pve.gpg
-    echo 'deb [signed-by=/etc/apt/keyrings/pve.gpg] http://download.proxmox.com/debian/pve $DEBIAN_SUITE pve-no-subscription' > /etc/apt/sources.list.d/pve.list
-    curl -fsSL $NVIDIA_DEBIAN/3bf863cc.pub | gpg --dearmor -o /etc/apt/keyrings/cuda.gpg
-    echo 'deb [signed-by=/etc/apt/keyrings/cuda.gpg] $NVIDIA_DEBIAN/ /' > /etc/apt/sources.list.d/cuda.list
-    sed -i 's/Components: main/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources
-    apt-get update -qq
-    apt-get install -y -qq --download-only --no-install-recommends $PAQUETS_PVE
+  docker run --rm -v "$SORTIE/apt/pve:/out" "debian:$DEBIAN_SUITE" bash -euc "
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq && apt-get install -y -qq dpkg-dev >/dev/null
+    rm -f /var/cache/apt/archives/*.deb; : > /tmp/vide
+    apt-get -o Dir::State::status=/tmp/vide install -y -qq --download-only --no-install-recommends $PAQUETS_PVE
     cp /var/cache/apt/archives/*.deb /out/
     cd /out && dpkg-scanpackages -m . /dev/null 2>/dev/null | gzip -9 > Packages.gz"
-  fait "$(find "$sortie/apt/pve" -name '*.deb' | wc -l) paquets Proxmox."
+  fait "$(find "$SORTIE/apt/pve" -name '*.deb' | wc -l) paquets Proxmox."
 
+  fi
+  if veut extra; then
+  etape "Exportateur SMART, image cloud Ubuntu"
+  install -d "$SORTIE/extra/pve"
+  curl -fsSL "https://github.com/prometheus-community/smartctl_exporter/releases/download/v$SMARTCTL_EXPORTER/smartctl_exporter-$SMARTCTL_EXPORTER.linux-amd64.tar.gz" \
+    | tar xz -C "$SORTIE/extra/pve" --strip-components=1 "smartctl_exporter-$SMARTCTL_EXPORTER.linux-amd64/smartctl_exporter"
+  if [[ ! -f "$SORTIE/extra/$IMAGE_CLOUD" ]]; then
+    curl -fL -o "$SORTIE/extra/$IMAGE_CLOUD" "$IMAGE_CLOUD_URL/$IMAGE_CLOUD"
+    curl -fsSL "$IMAGE_CLOUD_URL/SHA256SUMS" | grep " \*\?$IMAGE_CLOUD\$" | (cd "$SORTIE/extra" && sha256sum -c --quiet) \
+      || { rm -f "$SORTIE/extra/$IMAGE_CLOUD"; erreur "L’image cloud ne correspond pas à l’empreinte officielle." "Relance le téléchargement."; }
+  fi
+  fait "Exportateur SMART $SMARTCTL_EXPORTER et image cloud $UBUNTU_VERSION dans extra/."
+
+  fi
+  if veut images; then
   etape "Images Docker"
-  : > "$sortie/images/digests.txt"
+  [[ -f "$SORTIE/images/digests.txt" ]] && mv "$SORTIE/images/digests.txt" "$SORTIE/images/digests.precedent"
+  : > "$SORTIE/images/digests.txt"
+  local nom
   for nom in "${!IMAGES[@]}"; do
     note "$nom"
-    docker pull -q --platform linux/amd64 "${IMAGES[$nom]}" >/dev/null
-    docker save "${IMAGES[$nom]}" | zstd -q -T0 -10 -o "$sortie/images/$nom.tar.zst"
-    printf '%s %s %s\n' "$nom" "${IMAGES[$nom]}" "$(docker inspect --format '{{index .RepoDigests 0}}' "${IMAGES[$nom]}")" >> "$sortie/images/digests.txt"
+    local ref="${IMAGES[$nom]}" fige
+    if actualiser "image:$nom"; then
+      docker pull -q --platform linux/amd64 "$ref" >/dev/null
+      verrou_ecrire "image:$nom" "$(docker inspect --format '{{index .RepoDigests 0}}' "$ref")"
+    fi
+    # Toujours tirée par son empreinte figée, puis étiquetée comme les fichiers compose l’attendent.
+    fige=$(verrou_lire "image:$nom")
+    docker pull -q --platform linux/amd64 "$fige" >/dev/null && docker tag "$fige" "$ref"
+    enregistrer "$nom" "$ref" "$fige"
   done
   note "opencode (construite localement)"
-  local ctx; ctx="$(mktemp -d)"
-  cat > "$ctx/Dockerfile" <<EOF
+  actualiser opencode && verrou_ecrire opencode "$(docker run --rm node:22-bookworm-slim npm view opencode-ai version 2>/dev/null)"
+  local OPENCODE_VERSION; OPENCODE_VERSION=$(verrou_lire opencode)
+  [[ -n "$OPENCODE_VERSION" ]] || erreur "Version d’OpenCode introuvable sur npm." "Vérifie l’accès à registry.npmjs.org."
+  CTX="$(mktemp -d)"
+  cat > "$CTX/Dockerfile" <<EOF
 FROM node:22-bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client ca-certificates ripgrep && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client ca-certificates ripgrep curl jq python3 python3-venv python3-pip && rm -rf /var/lib/apt/lists/*
 RUN npm install -g opencode-ai@${OPENCODE_VERSION}
 # shortcut: OpenCode installe ses fournisseurs à la volée ; on précharge celui qu’on utilise. Vérifier au premier test hors ligne.
 RUN mkdir -p /home/node/.cache/opencode && cd /home/node/.cache/opencode && npm install @ai-sdk/openai-compatible && chown -R node:node /home/node/.cache
@@ -132,92 +846,317 @@ WORKDIR /workspace
 ENTRYPOINT ["opencode"]
 CMD ["serve", "--hostname", "0.0.0.0", "--port", "4096"]
 EOF
-  docker build -q -t "hibou/opencode:$(date +%Y%m%d)" -t hibou/opencode:actuel "$ctx" >/dev/null
-  docker save hibou/opencode:actuel | zstd -q -T0 -10 -o "$sortie/images/opencode.tar.zst"
-  echo "opencode hibou/opencode:actuel construite-$(date +%Y%m%d)" >> "$sortie/images/digests.txt"
-  rm -rf "$ctx"
+  construire opencode; rm -rf "$CTX"
+  note "docs-builder (construite localement)"
+  CTX="$(mktemp -d)"
+  cat > "$CTX/Dockerfile" <<'EOF'
+FROM node:22-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends chromium git rsync python3 python3-venv python3-yaml fonts-dejavu-core \
+ && rm -rf /var/lib/apt/lists/*
+ENV PUPPETEER_SKIP_DOWNLOAD=1 PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+RUN npm install -g @mermaid-js/mermaid-cli@11 markdownlint-cli2 \
+ && echo '{"args":["--no-sandbox"]}' > /etc/puppeteer.json
+RUN python3 -m venv --system-site-packages /opt/mkdocs && /opt/mkdocs/bin/pip install --no-cache-dir mkdocs-material \
+ && ln -s /opt/mkdocs/bin/mkdocs /usr/local/bin/mkdocs
+EOF
+  construire docs-builder; rm -rf "$CTX"
+  note "priorite (construite localement)"
+  CTX="$(mktemp -d)"
+  source_priorite > "$CTX/priorite.py"
+  cat > "$CTX/Dockerfile" <<'EOF'
+FROM python:3.13-slim
+RUN pip install --no-cache-dir aiohttp==3.12.15
+COPY priorite.py /app/priorite.py
+RUN HIBOU_AUTOTEST=1 python /app/priorite.py
+CMD ["python", "/app/priorite.py"]
+EOF
+  construire priorite; rm -rf "$CTX"
+  note "relecteur (construite localement)"
+  CTX="$(mktemp -d)"
+  source_relecteur > "$CTX/relecteur.py"
+  cat > "$CTX/Dockerfile" <<'EOF'
+FROM python:3.13-slim
+COPY relecteur.py /app/relecteur.py
+RUN HIBOU_AUTOTEST=1 python /app/relecteur.py
+CMD ["python", "/app/relecteur.py"]
+EOF
+  construire relecteur; rm -rf "$CTX"
+  if [[ "${HIBOU_IMG_NB:-0}" != 0 ]]; then
+    note "comfyui (construite localement, environ 10 Go)"
+    actualiser comfyui && verrou_ecrire comfyui "$(git ls-remote https://github.com/Comfy-Org/ComfyUI HEAD | cut -f1)"
+    local commit; commit=$(verrou_lire comfyui)
+    CTX="$(mktemp -d)"
+    cat > "$CTX/Dockerfile" <<EOF
+FROM $COMFY_BASE
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+RUN git init -q /opt/comfyui && cd /opt/comfyui && git fetch -q --depth 1 https://github.com/Comfy-Org/ComfyUI $commit \\
+ && git checkout -q FETCH_HEAD && pip install --no-cache-dir -r /opt/comfyui/requirements.txt
+WORKDIR /opt/comfyui
+ENTRYPOINT ["python", "main.py", "--listen", "0.0.0.0", "--port", "8188", "--disable-auto-launch"]
+EOF
+    construire comfyui; rm -rf "$CTX"
+  else
+    rm -f "$SORTIE/images/comfyui.tar.zst"
+  fi
+  rm -f "$SORTIE/images/digests.precedent"
   fait "Images enregistrées."
 
+  fi
+  if veut modeles; then
   etape "Modèles"
-  local venv="$sortie/.venv-hf"
+  local venv="$SORTIE/.venv-hf" role ligne alias depot motifs n
   python3 -m venv "$venv" && "$venv/bin/pip" install -q -U huggingface_hub
-  local ligne alias depot motifs role
-  for ligne in "${MODELES[@]}"; do
-    IFS='|' read -r alias depot motifs role <<< "$ligne"
-    note "$alias ($depot)"
-    local incl=(); IFS=',' read -ra m <<< "$motifs"; for x in "${m[@]}"; do incl+=(--include "$x"); done
-    "$venv/bin/hf" download "$depot" "${incl[@]}" --local-dir "$sortie/models/$alias" >/dev/null
-    rm -rf "$sortie/models/$alias/.cache"
-    ls "$sortie/models/$alias"/*.gguf >/dev/null 2>&1 || erreur "Aucun GGUF pour $alias." "Vérifie le dépôt $depot et le motif $motifs."
+  for role in dev doc; do
+    n="HIBOU_PROFIL_${role^^}"; profil "$role" "${!n}"
+    for ligne in "${MODELES_ROLE[@]}"; do
+      IFS='|' read -r alias depot motifs _ <<< "$ligne"
+      note "$role · $alias ($depot)"
+      actualiser "modele:$depot" && verrou_ecrire "modele:$depot" \
+        "$("$venv/bin/python" -c 'import sys; from huggingface_hub import HfApi; print(HfApi().model_info(sys.argv[1]).sha)' "$depot")"
+      local incl=() m x; IFS=',' read -ra m <<< "$motifs"; for x in "${m[@]}"; do incl+=(--include "$x"); done
+      # Un dossier par rôle : doc et dev peuvent avoir le même modèle dans deux quantifications.
+      "$venv/bin/hf" download "$depot" "${incl[@]}" --revision "$(verrou_lire "modele:$depot")" --local-dir "$SORTIE/models/$role/$alias" >/dev/null
+      rm -rf "$SORTIE/models/$role/$alias/.cache"
+      # Fichiers d’une autre quantification restés d’un profil précédent : retirés.
+      find "$SORTIE/models/$role/$alias" -name '*.gguf' -print0 | while IFS= read -r -d '' x; do
+        local garde=0 p; for p in "${m[@]}"; do [[ "${x#"$SORTIE/models/$role/$alias/"}" == $p ]] && garde=1; done
+        (( garde )) || rm -f "$x"
+      done
+      [[ -n "$(find "$SORTIE/models/$role/$alias" -name '*.gguf' -print -quit)" ]] || erreur "Aucun GGUF pour $alias." "Vérifie le dépôt $depot et le motif $motifs."
+    done
   done
+  if [[ "${HIBOU_IMG_NB:-0}" != 0 ]]; then
+    IFS='|' read -r depot x _ <<< "$(modele_image "$HIBOU_IMG_GO")"
+    note "doc · images ($depot)"
+    actualiser "modele:$depot" && verrou_ecrire "modele:$depot" \
+      "$("$venv/bin/python" -c 'import sys; from huggingface_hub import HfApi; print(HfApi().model_info(sys.argv[1]).sha)' "$depot")"
+    "$venv/bin/hf" download "$depot" "$x" --revision "$(verrou_lire "modele:$depot")" --local-dir "$SORTIE/models/doc/comfy" >/dev/null
+    rm -rf "$SORTIE/models/doc/comfy/.cache"
+  fi
   rm -rf "$venv"
+  # Modèles qui ne sont plus dans les profils : retirés, le bundle ne grossit pas à chaque changement.
+  local d garder
+  for d in "$SORTIE"/models/*/; do [[ "$(basename "$d")" =~ ^(dev|doc)$ ]] || { note "retiré : $(basename "$d") (ancienne disposition)"; rm -rf "$d"; }; done
+  for role in dev doc; do
+    garder=" $(modeles_du_role "$role" | tr '\n' ' ') "
+    for d in "$SORTIE/models/$role"/*/; do
+      [[ -d "$d" && "$garder" != *" $(basename "$d") "* ]] && { note "retiré : $role · $(basename "$d")"; rm -rf "$d"; }
+    done
+  done
   fait "Modèles téléchargés."
 
+  fi
+  if veut miroir && [[ "${HIBOU_MIROIR:-0}" == 1 ]]; then
+  etape "Miroir de dépendances"
+  listes_miroir "$SORTIE/miroir.d"
+  note "miroir (image d’import, construite localement)"
+  CTX="$(mktemp -d)"
+  cp "$ICI_HIBOU/hibou-miroir.py" "$CTX/"
+  cat > "$CTX/Dockerfile" <<'EOF'
+FROM node:22-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip git ca-certificates curl \
+ && pip3 install --no-cache-dir --break-system-packages twine \
+ && curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz | tar xz -C /usr/local/bin --strip-components=1 docker/docker \
+ && apt-get purge -y curl && rm -rf /var/lib/apt/lists/*
+COPY hibou-miroir.py /app/hibou-miroir.py
+ENTRYPOINT ["python3", "/app/hibou-miroir.py"]
+EOF
+  construire miroir; rm -rf "$CTX"
+  HIBOU_PY_VERSIONS="$HIBOU_PY_VERSIONS" python3 "$ICI_HIBOU/hibou-miroir.py" prepare --src "$SORTIE/miroir.d" --out "$SORTIE/mirror"
+  fait "Miroir prêt : $(du -sh "$SORTIE/mirror" | cut -f1)."
+  fi
   etape "Charte, manifeste, empreintes"
-  [[ -d "${HIBOU_CHARTE:-./charte}" ]] && cp -r "${HIBOU_CHARTE:-./charte}" "$sortie/charte" && fait "Charte copiée."
-  cp "$0" "$sortie/hibou" && chmod +x "$sortie/hibou"
+  local charte="${HIBOU_CHARTE:-$ICI_HIBOU/charte}"
+  [[ -d "$charte" ]] || erreur "Je ne trouve pas la charte dans $charte." "Place le dossier charte à côté du script, ou indique-le avec HIBOU_CHARTE."
+  rm -rf "$SORTIE/charte" "$SORTIE/amorces"
+  cp -r "$charte" "$SORTIE/charte" && cp -r "$(dirname "$charte")/amorces" "$SORTIE/amorces"
+  [[ "$(readlink -f "$0")" == "$SORTIE/hibou" ]] || cp "$0" "$ICI_HIBOU/hibou-miroir.py" "$SORTIE/"
+  chmod 755 "$SORTIE/hibou"
   {
     echo "# Bundle Hibou $(date +%Y-%m-%d)"; echo
-    echo "Script : $VERSION_HIBOU · Domaine : $DOMAINE · NVIDIA : branche $NVIDIA_BRANCHE"; echo
-    echo "## Images"; echo; sed 's/^/- /' "$sortie/images/digests.txt"; echo
-    echo "## Modèles"; echo; for ligne in "${MODELES[@]}"; do echo "- ${ligne//|/ · }"; done; echo
+    echo "Script : $VERSION_HIBOU · Domaine : $DOMAINE · NVIDIA : $NVIDIA_VERSION"; echo
+    echo "dev : $HIBOU_DEV_NB × $HIBOU_DEV_GPU, profil ${PROFILS_DEV[HIBOU_PROFIL_DEV-1]}"
+    echo "doc : $HIBOU_DOC_NB × $HIBOU_DOC_GPU, profil ${PROFILS_DOC[HIBOU_PROFIL_DOC-1]}"
+    [[ "$HIBOU_IMG_NB" != 0 ]] && echo "images : $HIBOU_IMG_GPU, $(modele_image "$HIBOU_IMG_GO" | cut -d'|' -f2)"
+    echo; echo "## Images"; echo; [[ -f "$SORTIE/images/digests.txt" ]] && sed 's/^/- /' "$SORTIE/images/digests.txt"; echo
+    echo "## Modèles"; echo
+    for role in dev doc; do n="HIBOU_PROFIL_${role^^}"; profil "$role" "${!n}"; for ligne in "${MODELES_ROLE[@]}"; do echo "- $role · ${ligne//|/ · }"; done; done; echo
+    echo "## Versions figées"; echo; sed 's/^/- /' "$SORTIE/versions.lock" 2>/dev/null; echo
     echo "## Paquets"; echo
-    (cd "$sortie/apt" && find . -name '*.deb' | sort | sed 's/^/- /')
-  } > "$sortie/MANIFEST.md"
-  (cd "$sortie" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+    (cd "$SORTIE/apt" && find . -name '*.deb' | sort | sed 's/^/- /')
+  } > "$SORTIE/MANIFEST.md"
+  (cd "$SORTIE" && find . -type f ! -name SHA256SUMS ! -path './.venv-hf/*' -print0 \
+    | sort -z | xargs -0 sha256sum > SHA256SUMS)
 
-  local taille; taille=$(du -s --block-size=1G "$sortie" | cut -f1)
+  local taille; taille=$(du -s --block-size=1G "$SORTIE" | cut -f1)
   fait "Bundle prêt : ${taille} Go."
-  if (( taille > CAPACITE_SUPPORT_GO * 90 / 100 )); then
-    note "Le bundle dépasse 90 % du support de ${CAPACITE_SUPPORT_GO} Go. Retire un modèle de la liste MODELES ou fais deux transferts."
-  fi
-  dire "Copie le dossier sur le disque USB (formaté en ext4), puis lance « hibou verifier » à l’arrivée."
+  (( taille <= CAPACITE_SUPPORT_GO * 90 / 100 )) || note "Le bundle dépasse 90 % du support de ${CAPACITE_SUPPORT_GO} Go (HIBOU_SUPPORT_GO)."
+  dire "Copie le dossier sur le disque USB (ext4), branche-le sur un hôte Proxmox et lance :"
+  note "sudo ./hibou installer forge   (sur un nœud du cluster)"
+  note "sudo ./hibou installer doc     (sur le R730 doc)"
+  note "sudo ./hibou installer dev     (sur le R730 dev)"
 }
 
 # ─── Vérification ───────────────────────────────────────────────────────────
 verifier() {
-  local b="${1:-$(dirname "$(readlink -f "$0")")}"
+  local b="${1:-$ICI_HIBOU}"
   [[ -f "$b/SHA256SUMS" ]] || erreur "Je ne trouve pas SHA256SUMS dans $b." "Indique le dossier du bundle : hibou verifier /chemin/du/bundle"
   etape "Vérification des empreintes"
-  if (cd "$b" && sha256sum --quiet -c SHA256SUMS); then fait "Tous les fichiers sont intacts."
-  else erreur "Des fichiers sont abîmés ou manquants." "Recopie-les depuis la VM de téléchargement, puis relance la vérification."; fi
+  local opt=(); [[ -f "$b/.partiel" ]] && opt=(--ignore-missing)
+  if (cd "$b" && sha256sum --quiet -c "${opt[@]}" SHA256SUMS); then fait "Tous les fichiers présents sont intacts."
+  else erreur "Des fichiers sont abîmés ou manquants." "Recopie-les depuis la machine connectée, puis relance."; fi
 }
 
-# ─── Installation ───────────────────────────────────────────────────────────
+# ─── Étapes à sauter ────────────────────────────────────────────────────────
+# Une seule question au début, sans réponse sous 30 s tout s’enchaîne. HIBOU_SAUTER=vm,copie pour l’imposer.
+proposer_sauts() {  # "id:libellé"...
+  [[ -t 0 && -z "${HIBOU_SAUTER+x}" ]] || return 0
+  local i=1 e r n
+  dire "Étapes prévues :"
+  for e in "$@"; do printf '    %s%d%s  %s\n' "$AMBRE" "$i" "$FIN" "${e#*:}"; i=$((i + 1)); done
+  read -t 30 -rp "  Numéros à sauter, séparés par des espaces (Entrée ou 30 s = aucune) : " r || echo
+  HIBOU_SAUTER=""
+  for n in $r; do [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= $# )) && HIBOU_SAUTER+="${!n%%:*},"; done
+  [[ -z "$HIBOU_SAUTER" ]] || note "Sautées : ${HIBOU_SAUTER%,}"
+}
+saute() { [[ ",${HIBOU_SAUTER:-}," == *",$1,"* ]]; }
+
+# ─── Secrets ────────────────────────────────────────────────────────────────
+secrets() {  # bundle ; phrase lue au clavier, ou sur l’entrée standard quand l’hôte pilote la VM
+  [[ -n "${HIBOU_ADMIN_MDP:-}" ]] && return 0
+  [[ -f "$1/secrets.chiffre" ]] || erreur "Je ne trouve pas secrets.chiffre dans $1." "Refais le bundle avec « hibou telecharger »."
+  if [[ -z "${PHRASE:-}" ]]; then
+    if [[ -t 0 ]]; then read -rsp "  Phrase de passe du bundle : " PHRASE; echo; else IFS= read -r PHRASE || true; fi
+  fi
+  local clair
+  clair=$(openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in "$1/secrets.chiffre" -pass fd:3 3<<<"$PHRASE" 2>/dev/null) \
+    || erreur "Phrase de passe refusée." "Relance et vérifie la saisie."
+  eval "$clair"
+}
+
+# ─── Installation : outils communs ──────────────────────────────────────────
 source_locale() {  # $1 = dossier apt du bundle
   echo "deb [trusted=yes] file:$1 ./" > /etc/apt/sources.list.d/hibou.list
   APT_HIBOU=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/hibou.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0)
+  printf 'Package: *\nPin: version %s*\nPin-Priority: 1001\n' "$NVIDIA_VERSION" > /etc/apt/preferences.d/hibou-nvidia
   apt-get "${APT_HIBOU[@]}" update -qq
 }
-apt_hibou() { DEBIAN_FRONTEND=noninteractive apt-get "${APT_HIBOU[@]}" install -y -qq --no-install-recommends "$@" >/dev/null; }
+# --no-remove : apt s’arrête plutôt que de désinstaller un paquet (cas du serveur SSH en REX 2).
+apt_hibou() {
+  DEBIAN_FRONTEND=noninteractive apt-get "${APT_HIBOU[@]}" install -y -qq --no-remove --no-install-recommends "$@" >/dev/null \
+    || erreur "apt refuse l’installation." "Relance à la main pour voir le détail : apt-get ${APT_HIBOU[*]} install --no-remove $*"
+}
 
+# Module NVIDIA compilé pour le noyau le plus récent installé, celui du prochain démarrage.
+verifier_dkms() {
+  local k; k=$(find /lib/modules -mindepth 1 -maxdepth 1 -printf '%f\n' | sort -V | tail -1)
+  dkms status -k "$k" 2>/dev/null | grep -q 'nvidia.*installed' \
+    || erreur "Le module NVIDIA n’est pas compilé pour le noyau $k." "Lis /var/lib/dkms/nvidia*/*/build/make.log ; il manque souvent les en-têtes de ce noyau."
+  fait "Module NVIDIA $NVIDIA_VERSION compilé pour le noyau $k."
+}
+
+demarrer() {  # dossier [services...]
+  (cd "$1" && docker compose up -d --quiet-pull "${@:2}") \
+    || erreur "Les services de $1 ne démarrent pas." "Lis : docker compose -f $1/compose.yaml logs --tail 50"
+}
+
+# Démarrage des services à chaque mise sous tension, une fois Docker et le pilote prêts.
+service_demarrage() {  # dossier
+  cat > /etc/systemd/system/hibou-services.service <<EOF
+[Unit]
+Description=Hibou : démarrage des services
+After=docker.service network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=$1
+ExecStart=/usr/bin/docker compose up -d
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload && systemctl enable hibou-services.service >/dev/null 2>&1
+}
+
+# Seules les images dont le fichier a changé depuis le dernier chargement sont relues.
 charger_images() {  # $1 bundle, $2 rôle
-  local nom
-  for nom in ${ROLE_IMAGES[$2]}; do
+  local nom e n=0; install -d /srv/hibou/etat
+  for nom in $(images_du_role "$2"); do
+    e=$(sha256sum "$1/images/$nom.tar.zst" | cut -c1-64)
+    [[ "$(cat "/srv/hibou/etat/image-$nom" 2>/dev/null)" == "$e" ]] && continue
     note "$nom"; zstd -dc "$1/images/$nom.tar.zst" | docker load -q >/dev/null
+    echo "$e" > "/srv/hibou/etat/image-$nom"; n=$((n + 1))
   done
-  fait "Images chargées."
+  fait "$n image(s) chargée(s), les autres étaient à jour."
 }
 
 copier_modeles() {  # $1 bundle, $2 rôle
   install -d /srv/models
-  local ligne alias depot motifs role
-  for ligne in "${MODELES[@]}"; do
-    IFS='|' read -r alias depot motifs role <<< "$ligne"
-    [[ "$role" == "$2" ]] || continue
-    note "$alias"; rsync -a "$1/models/$alias/" "/srv/models/$alias/"
+  local alias d garder=" $(modeles_du_role "$2" | tr '\n' ' ') "
+  for alias in $(modeles_du_role "$2"); do note "$alias"; rsync -a --delete "$1/models/$2/$alias/" "/srv/models/$alias/"; done
+  for d in /srv/models/*/; do
+    [[ -d "$d" && "$garder" != *" $(basename "$d") "* ]] && { note "retiré : $(basename "$d")"; rm -rf "$d"; }
   done
-  fait "Modèles copiés dans /srv/models."
+  fait "Modèles à jour dans /srv/models ($(du -sh /srv/models | cut -f1))."
 }
 
 # Premier fichier GGUF d’un modèle (hors projecteur), relatif à /srv/models.
 gguf()   { (cd /srv/models && find "$1" -name '*.gguf' ! -name '*mmproj*' | sort | head -1); }
 mmproj() { (cd /srv/models && find "$1" -name '*mmproj*.gguf' | sort | head -1); }
 
-cle_api() {
-  install -d -m 700 /srv/hibou/secrets
-  [[ -f /srv/hibou/secrets/api-key ]] || head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' > /srv/hibou/secrets/api-key
-  cat /srv/hibou/secrets/api-key
+resolveur() {  # systemd-resolved interroge forge pour tout le domaine
+  install -d /etc/systemd/resolved.conf.d
+  printf '[Resolve]\nDNS=%s\nDomains=~%s\n' "$HIBOU_IP_FORGE" "$DOMAINE" > /etc/systemd/resolved.conf.d/hibou.conf
+  systemctl restart systemd-resolved 2>/dev/null || true
+}
+
+client_reseau() {  # DNS et heure depuis la VM forge
+  resolveur
+  printf 'server %s iburst\n' "$HIBOU_IP_FORGE" > /etc/chrony/sources.d/hibou.sources
+  systemctl restart chrony
+  fait "DNS et heure pointés sur forge ($HIBOU_IP_FORGE)."
+}
+
+exportateurs() {  # bloc compose
+  printf '%s' "
+  node-exporter:
+    image: ${IMAGES[node-exporter]}
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    command: [--path.rootfs=/host, --collector.textfile.directory=/textfile]
+    volumes: [\"/:/host:ro,rslave\", \"/srv/hibou/metriques:/textfile:ro\"]
+  gpu-exporter:
+    image: ${IMAGES[gpu-exporter]}
+    restart: unless-stopped
+    ports: [\"9835:9835\"]
+    deploy: { resources: { reservations: { devices: [{ driver: nvidia, count: all, capabilities: [gpu, utility] }] } } }"
+}
+
+# Le disque de la VM est plus grand que l’image ou que ce que l’installateur d’Ubuntu a utilisé :
+# on agrandit la partition, puis le volume LVM s’il y en a un, puis le système de fichiers.
+agrandir_systeme() {
+  local src part pv="" vg disque num avant
+  src=$(findmnt -no SOURCE /)
+  if [[ "$src" == /dev/mapper/* ]]; then
+    vg=$(lvs --noheadings -o vg_name "$src" | tr -d ' ')
+    pv=$(pvs --noheadings -o pv_name -S "vg_name=$vg" | head -1 | tr -d ' ')
+    part="$pv"
+  else part="$src"; fi
+  disque="/dev/$(lsblk -no pkname "$part" | head -1)"
+  num=$(cat "/sys/class/block/$(basename "$(readlink -f "$part")")/partition" 2>/dev/null || true)
+  avant=$(df -BG --output=size / | tail -1 | tr -dc 0-9)
+  [[ -n "$num" ]] && { growpart "$disque" "$num" >/dev/null 2>&1 || true; }   # code 1 = rien à agrandir
+  if [[ -n "$pv" ]]; then
+    pvresize -q "$pv" >/dev/null
+    lvextend -q -r -l +100%FREE "$src" >/dev/null 2>&1 || true
+  else
+    case "$(findmnt -no FSTYPE /)" in
+      ext4) resize2fs "$src" >/dev/null 2>&1 || true ;;
+      xfs)  xfs_growfs / >/dev/null 2>&1 || true ;;
+    esac
+  fi
+  fait "Système : ${avant} Go → $(df -BG --output=size / | tail -1 | tr -dc 0-9) Go (tout le disque)."
 }
 
 docker_nvidia() {
@@ -225,220 +1164,886 @@ docker_nvidia() {
   systemctl restart docker
 }
 
-caddyfile() {  # $1 = nom public de l’interface, $2 = service:port interne, $3 = nom public de l’API
-  cat > /srv/hibou/Caddyfile <<EOF
-{
-	local_certs
-}
-$1.$DOMAINE {
-	reverse_proxy $2
-}
-$3.$DOMAINE {
-	@sansCle not header Authorization "Bearer {\$HIBOU_API_KEY}"
-	respond @sansCle "Clé d’API absente ou invalide." 401
-	reverse_proxy llama-swap:8080
-}
-EOF
-}
-
-installer_dev() {
-  local b="$1"
-  etape "Pilote NVIDIA, Docker, NVIDIA Container Toolkit"
-  source_locale "$b/apt/ubuntu"
-  apt_hibou $PAQUETS_UBUNTU
-  docker_nvidia
-  fait "Socle installé."
-  etape "Images et modèles"; charger_images "$b" dev; copier_modeles "$b" dev
-
-  etape "Configuration"
-  install -d /srv/hibou /srv/workspace
-  chown 1000:1000 /srv/workspace
-  cat > /srv/hibou/llama-swap.yaml <<EOF
-models:
-  qwen3.8-27b:
-    cmd: /app/llama-server --port \${PORT} -m /models/$(gguf qwen3.8-27b-q8) --mmproj /models/$(mmproj qwen3.8-27b-q8) -ngl 99 -c 131072 -fa on --jinja
-  qwen3-coder-next:
-    cmd: /app/llama-server --port \${PORT} -m /models/$(gguf qwen3-coder-next) -ngl 99 -c 65536 -fa on --jinja
-  qwen2.5-coder-7b:
-    cmd: /app/llama-server --port \${PORT} -m /models/$(gguf qwen2.5-coder-7b) -ngl 99 -c 8192 -fa on
-groups:
-  code:
-    swap: false
-    exclusive: true
-    members: [qwen3.8-27b, qwen2.5-coder-7b]
-EOF
-  cat > /srv/hibou/opencode.json <<'EOF'
-{
-  "$schema": "https://opencode.ai/config.json",
-  "theme": "hibou",
-  "model": "hibou/qwen3.8-27b",
-  "provider": {
-    "hibou": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Hibou",
-      "options": { "baseURL": "http://llama-swap:8080/v1" },
-      "models": { "qwen3.8-27b": {}, "qwen3-coder-next": {} }
-    }
-  },
-  "permission": {
-    "edit": "allow",
-    "bash": {
-      "*": "ask",
-      "git status*": "allow", "git diff*": "allow", "git log*": "allow",
-      "ls*": "allow", "cat*": "allow", "grep*": "allow", "rg*": "allow",
-      "git push*main*": "deny", "sudo*": "deny"
-    }
+# Ports des VM GPU ouverts à forge seule (API, ComfyUI, métriques). Avant le DNAT de Docker.
+pare_feu() {
+  install -d /etc/hibou
+  cat > /etc/hibou/pare-feu.nft <<EOF
+table inet hibou
+delete table inet hibou
+table inet hibou {
+  chain entree {
+    type filter hook prerouting priority -150; policy accept;
+    meta nfproto ipv6 tcp dport { 8080, 8188, 9100, 9835 } drop
+    tcp dport { 8080, 8188, 9100, 9835 } ip saddr != $HIBOU_IP_FORGE drop
   }
 }
 EOF
-  caddyfile code opencode:4096 llm-dev
-  cat > /srv/hibou/compose.yaml <<EOF
-name: hibou-dev
-services:
-  llama-swap:
-    image: ${IMAGES[llama-swap]}
-    restart: unless-stopped
-    volumes: ["/srv/models:/models:ro", "./llama-swap.yaml:/app/config.yaml:ro"]
-    deploy: { resources: { reservations: { devices: [{ driver: nvidia, count: all, capabilities: [gpu] }] } } }
-    networks: [interne]
-  opencode:
-    image: hibou/opencode:actuel
-    restart: unless-stopped
-    volumes: ["/srv/workspace:/workspace", "./opencode.json:/home/node/.config/opencode/opencode.json:ro"]
-    networks: [interne]
-  caddy:
-    image: ${IMAGES[caddy]}
-    restart: unless-stopped
-    ports: ["443:443"]
-    environment: { HIBOU_API_KEY: "$(cle_api)" }
-    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy:/data"]
-    networks: [interne, externe]
-networks:
-  interne: { internal: true }
-  externe: {}
-volumes: { caddy: {} }
+  cat > /etc/systemd/system/hibou-pare-feu.service <<'EOF'
+[Unit]
+Description=Hibou : ports des services réservés à forge
+Before=docker.service
+After=network-pre.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/hibou/pare-feu.nft
+[Install]
+WantedBy=multi-user.target
 EOF
-  chmod 600 /srv/hibou/compose.yaml
-  (cd /srv/hibou && docker compose up -d --quiet-pull 2>/dev/null)
-  fait "Hibou dev démarré : https://code.$DOMAINE et https://llm-dev.$DOMAINE"
-  note "Clé d’API : /srv/hibou/secrets/api-key"
+  systemctl daemon-reload && systemctl enable --now hibou-pare-feu.service >/dev/null 2>&1
+  fait "Ports 8080, 8188, 9100 et 9835 ouverts à forge ($HIBOU_IP_FORGE) seulement."
 }
 
-installer_doc() {
+# ─── Hôtes Proxmox ──────────────────────────────────────────────────────────
+preparer_hote() {  # bundle rôle
   local b="$1"
-  etape "Pilote NVIDIA (espace utilisateur), Docker, NVIDIA Container Toolkit"
-  [[ -e /dev/nvidia0 ]] || erreur "Je ne vois aucun GPU dans ce conteneur." "Sur l’hôte, lance « hibou installer pve », applique la configuration LXC indiquée, puis redémarre le conteneur."
-  source_locale "$b/apt/ubuntu"
-  # Pas de modules noyau dans un LXC : ils viennent de l’hôte.
-  apt_hibou docker-ce docker-ce-cli containerd.io docker-compose-plugin nvidia-container-toolkit \
-    "nvidia-utils-$NVIDIA_BRANCHE" "libnvidia-compute-$NVIDIA_BRANCHE" chrony zstd jq rsync
-  nvidia-ctk config --set nvidia-container-cli.no-cgroups=true --in-place
-  docker_nvidia
-  local hote ici
-  hote="$(cat /proc/driver/nvidia/version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)"
-  ici="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 || true)"
-  [[ -n "$ici" && "$hote" == "$ici" ]] || erreur "Pilote de l’hôte ($hote) et du conteneur (${ici:-illisible}) différents." "Installe les deux depuis le même bundle."
-  fait "Socle installé, pilote $ici, $(nvidia-smi -L | wc -l) GPU visibles."
-  etape "Images et modèles"; charger_images "$b" doc; copier_modeles "$b" doc
-
-  etape "Configuration"
-  install -d /srv/hibou
-  local split="--split-mode layer --tensor-split 1,1,1,1"
-  cat > /srv/hibou/llama-swap.yaml <<EOF
-models:
-  gemma-4-26b:
-    cmd: /app/llama-server --port \${PORT} -m /models/$(gguf gemma-4-26b) --mmproj /models/$(mmproj gemma-4-26b) -ngl 99 $split -c 65536 -fa on --jinja
-  qwen3.8-27b:
-    cmd: /app/llama-server --port \${PORT} -m /models/$(gguf qwen3.8-27b-q4) --mmproj /models/$(mmproj qwen3.8-27b-q4) -ngl 99 $split -c 32768 -fa on --jinja
-  qwen3-embedding:
-    cmd: /app/llama-server --port \${PORT} -m /models/$(gguf qwen3-embedding) -ngl 0 --embedding --pooling last
-groups:
-  rag:
-    persistent: true
-    swap: false
-    exclusive: false
-    members: [qwen3-embedding]
-EOF
-  caddyfile chat open-webui:8080 llm-doc
-  cat > /srv/hibou/compose.yaml <<EOF
-name: hibou-doc
-services:
-  llama-swap:
-    image: ${IMAGES[llama-swap]}
-    restart: unless-stopped
-    volumes: ["/srv/models:/models:ro", "./llama-swap.yaml:/app/config.yaml:ro"]
-    deploy: { resources: { reservations: { devices: [{ driver: nvidia, count: all, capabilities: [gpu] }] } } }
-    networks: [interne]
-  open-webui:
-    image: ${IMAGES[open-webui]}
-    restart: unless-stopped
-    environment:
-      WEBUI_NAME: Hibou
-      OFFLINE_MODE: "true"
-      HF_HUB_OFFLINE: "1"
-      ENABLE_OLLAMA_API: "false"
-      OPENAI_API_BASE_URLS: http://llama-swap:8080/v1
-      OPENAI_API_KEYS: hibou
-      RAG_EMBEDDING_ENGINE: openai
-      RAG_OPENAI_API_BASE_URL: http://llama-swap:8080/v1
-      RAG_OPENAI_API_KEY: hibou
-      RAG_EMBEDDING_MODEL: qwen3-embedding
-    volumes: ["open-webui:/app/backend/data"]
-    networks: [interne]
-  caddy:
-    image: ${IMAGES[caddy]}
-    restart: unless-stopped
-    ports: ["443:443"]
-    environment: { HIBOU_API_KEY: "$(cle_api)" }
-    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy:/data"]
-    networks: [interne, externe]
-networks:
-  interne: { internal: true }
-  externe: {}
-volumes: { open-webui: {}, caddy: {} }
-EOF
-  chmod 600 /srv/hibou/compose.yaml
-  (cd /srv/hibou && docker compose up -d --quiet-pull 2>/dev/null)
-  fait "Hibou doc démarré : https://chat.$DOMAINE et https://llm-doc.$DOMAINE"
-}
-
-installer_pve() {
-  local b="$1"
-  [[ -f /etc/pve/.version ]] || erreur "Ce n’est pas un hôte Proxmox." "Lance ce rôle sur le 7910, en root."
-  etape "En-têtes Proxmox et pilote NVIDIA de l’hôte"
+  etape "Supervision de l’hôte"
   source_locale "$b/apt/pve"
   apt_hibou $PAQUETS_PVE
-  systemctl enable --now nvidia-persistenced >/dev/null 2>&1 || true
-  fait "Pilote installé."
-  etape "Configuration du conteneur LXC doc"
-  local f=/root/hibou-lxc-doc.conf i=0 d
-  : > "$f"
-  for d in /dev/nvidia0 /dev/nvidia1 /dev/nvidia2 /dev/nvidia3 /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-caps/nvidia-cap1 /dev/nvidia-caps/nvidia-cap2; do
-    echo "dev$i: $d" >> "$f"; i=$((i + 1))
+  # Carte Intel I217-LM (e1000e) : blocages connus avec les déchargements TSO/GSO/GRO.
+  local itf
+  for itf in /sys/class/net/*; do
+    [[ "$(basename "$(readlink -f "$itf/device/driver" 2>/dev/null)")" == e1000e ]] || continue
+    itf=$(basename "$itf")
+    cat > "/etc/systemd/system/hibou-e1000e@.service" <<'EOF'
+[Unit]
+Description=Hibou : déchargements désactivés sur %i (e1000e)
+After=network-pre.target
+Before=network.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/ethtool -K %i tso off gso off gro off
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload && systemctl enable --now "hibou-e1000e@$itf.service" >/dev/null 2>&1
+    fait "Déchargements TSO, GSO et GRO désactivés sur $itf (e1000e)."
   done
-  echo "features: nesting=1,keyctl=1" >> "$f"
-  fait "Lignes à ajouter à /etc/pve/lxc/<id>.conf : $f"
-  note "Les périphériques n’existent qu’après un redémarrage de l’hôte. Redémarre, vérifie nvidia-smi, puis ajoute ces lignes."
+  install -m 755 "$b/extra/pve/smartctl_exporter" /usr/local/bin/smartctl_exporter
+  cat > /etc/systemd/system/smartctl-exporter.service <<'EOF'
+[Unit]
+Description=Exportateur Prometheus des états SMART
+After=network-online.target
+[Service]
+ExecStart=/usr/local/bin/smartctl_exporter --web.listen-address=:9633
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now prometheus-node-exporter smartctl-exporter >/dev/null 2>&1 || true
+  fait "Exportateurs node (9100) et SMART (9633) actifs."
+  if [[ "$2" != forge ]] && ping -c1 -W2 "$HIBOU_IP_FORGE" >/dev/null 2>&1; then
+    printf 'server %s iburst\n' "$HIBOU_IP_FORGE" > /etc/chrony/sources.d/hibou.sources 2>/dev/null && systemctl restart chrony && fait "Heure prise sur forge."
+  fi
+  if [[ "$2" == forge ]]; then
+    [[ -n "${HIBOU_STOCKAGE_SAUVEGARDE:-}" ]] || erreur "Aucun stockage de sauvegarde dans la configuration." "Refais le menu du bundle (« Tout refaire ») et indique un stockage Proxmox."
+    pvesm status --storage "$HIBOU_STOCKAGE_SAUVEGARDE" --content backup >/dev/null 2>&1 \
+      || erreur "Le stockage $HIBOU_STOCKAGE_SAUVEGARDE n’existe pas ou n’accepte pas les sauvegardes." "Datacenter > Storage : ajoute-le avec le contenu « VZDump backup file », puis relance."
+    install -d /var/lib/prometheus/node-exporter
+    cat > /usr/local/bin/hibou-vzdump-hook <<'EOF'
+#!/bin/sh
+# Appelé par vzdump : note l’heure de chaque sauvegarde réussie pour Prometheus.
+[ "$1" = "backup-end" ] || exit 0
+f=/var/lib/prometheus/node-exporter/hibou_vzdump_$3.prom
+echo "hibou_sauvegarde_derniere_reussite_timestamp{type=\"vzdump\",vmid=\"$3\"} $(date +%s)" > "$f.tmp" && mv "$f.tmp" "$f"
+EOF
+    chmod 755 /usr/local/bin/hibou-vzdump-hook
+    pvesh get /cluster/backup/hibou >/dev/null 2>&1 && pvesh delete /cluster/backup/hibou
+    # forge seule : les VM GPU ne contiennent que des modèles et une configuration, rejouables depuis le bundle.
+    pvesh create /cluster/backup --id hibou --schedule "03:00" --vmid "$HIBOU_VMID_FORGE" --mode snapshot --compress zstd \
+      --storage "$HIBOU_STOCKAGE_SAUVEGARDE" --prune-backups keep-daily=7,keep-weekly=4 \
+      --script /usr/local/bin/hibou-vzdump-hook --notes-template "Hibou {{guestname}}" >/dev/null
+    fait "Sauvegarde quotidienne à 3 h de forge vers $HIBOU_STOCKAGE_SAUVEGARDE, 7 jours et 4 semaines."
+  fi
+}
+
+# Cartes NVIDIA réservées à vfio-pci, tout de suite et à chaque démarrage. Proxmox 9 active l’IOMMU Intel par défaut.
+gpu_vfio() {
+  local ids d p drv n=0
+  [[ -n "$(lspci -d 10de: 2>/dev/null)" ]] || erreur "Je ne vois aucune carte NVIDIA sur cet hôte." "Vérifie le montage des cartes et leur alimentation."
+  [[ -n "$(ls /sys/kernel/iommu_groups 2>/dev/null)" ]] \
+    || erreur "L’IOMMU est inactive." "Dans le BIOS du R730 : Processor Settings > Virtualization Technology = Enabled, et Integrated Devices > Memory Mapped I/O above 4GB = Enabled. Redémarre puis relance."
+  ids=$(lspci -n -d 10de: | awk '{print $3}' | sort -u | paste -sd,)
+  printf 'options vfio-pci ids=%s disable_vga=1\nsoftdep nouveau pre: vfio-pci\nsoftdep nvidia pre: vfio-pci\n' "$ids" > /etc/modprobe.d/hibou-vfio.conf
+  printf 'blacklist nouveau\nblacklist nvidiafb\nblacklist nvidia\n' > /etc/modprobe.d/hibou-blacklist.conf
+  printf 'vfio\nvfio_iommu_type1\nvfio_pci\n' > /etc/modules-load.d/hibou-vfio.conf
+  update-initramfs -u -k all >/dev/null 2>&1
+  modprobe vfio-pci
+  for d in $(lspci -Dmm -d 10de: | awk '{print $1}'); do
+    p="/sys/bus/pci/devices/$d"; drv=$(basename "$(readlink -f "$p/driver" 2>/dev/null)")
+    n=$((n + 1))
+    [[ "$drv" == vfio-pci ]] && continue
+    [[ -e "$p/driver" ]] && echo "$d" > "$p/driver/unbind"
+    echo vfio-pci > "$p/driver_override"; echo "$d" > /sys/bus/pci/drivers_probe
+  done
+  fait "$n fonctions PCI NVIDIA confiées à vfio-pci ($ids)."
+}
+
+stockage_vm() {
+  if [[ -n "${HIBOU_STOCKAGE:-}" ]]; then echo "$HIBOU_STOCKAGE"; return; fi
+  pvesm status --content images --enabled 1 2>/dev/null | awk 'NR>1 {print $6, $1}' | sort -n | tail -1 | cut -d' ' -f2
+}
+
+# Domaine de connexion « forgejo » sur l’hôte : certificat racine et secret lus sur forge par SSH.
+realm_proxmox() {
+  local ca env id secret
+  ca=$(ssh_vm "$HIBOU_IP_FORGE" 'sudo cat /srv/hibou/hibou-ca.crt' 2>/dev/null) \
+    && env=$(ssh_vm "$HIBOU_IP_FORGE" 'sudo cat /srv/hibou/pve-oidc.env' 2>/dev/null) \
+    || { note "Forge injoignable ou pas encore configurée : connexion Proxmox par Forgejo à refaire plus tard (relance ce rôle)."; return 0; }
+  printf '%s\n' "$ca" > /usr/local/share/ca-certificates/hibou.crt && update-ca-certificates >/dev/null
+  id=$(sed -n 's/^PVE_ID=//p' <<< "$env"); secret=$(sed -n 's/^PVE_SECRET=//p' <<< "$env")
+  local opts=(--issuer-url "https://forge.$DOMAINE/" --client-id "$id" --client-key "$secret" --username-claim username --autocreate 1 --comment "Hibou · Forge")
+  if pveum realm list --output-format json | jq -e '.[] | select(.realm=="forgejo")' >/dev/null; then pveum realm modify forgejo "${opts[@]}"
+  else pveum realm add forgejo --type openid "${opts[@]}"; fi
+  # L’administrateur Hibou administre Proxmox ; root@pam reste l’accès de secours.
+  pveum user list --output-format json | jq -e --arg u "$HIBOU_ADMIN_NOM@forgejo" '.[] | select(.userid==$u)' >/dev/null \
+    || pveum user add "$HIBOU_ADMIN_NOM@forgejo" --email "$HIBOU_ADMIN_MAIL"
+  pveum acl modify / --users "$HIBOU_ADMIN_NOM@forgejo" --roles Administrator
+  fait "Proxmox : connexion par Forgejo active, $HIBOU_ADMIN_NOM@forgejo administrateur. root@pam reste l’accès de secours."
+}
+
+ssh_vm() {  # adresse commande...
+  ssh -i /root/.ssh/hibou_ed25519 -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
+    -o UserKnownHostsFile=/root/.ssh/hibou_known_hosts -T "hibou@$1" "${@:2}"
+}
+attendre_ssh() {
+  local i
+  for i in $(seq 1 72); do ssh_vm "$1" true 2>/dev/null && return 0; sleep 5; done
+  erreur "La VM $1 ne répond pas en SSH après 6 minutes." "Ouvre sa console dans Proxmox (compte hibou) et regarde « cloud-init status --long »."
+}
+
+creer_vm() {  # rôle bundle
+  local role="$1" b="$2" id ip nom st mem coeurs sockets disque
+  id="HIBOU_VMID_${role^^}"; id="${!id}"; ip="HIBOU_IP_${role^^}"; ip="${!ip}"; nom="hibou-$role"
+  disque="HIBOU_DISQUE_${role^^}"; disque="${!disque}"
+  etape "VM $nom ($id)"
+  if qm status "$id" >/dev/null 2>&1; then
+    note "La VM $id existe déjà : je la garde. Pour repartir de zéro : qm stop $id && qm destroy $id --purge"
+    qm start "$id" >/dev/null 2>&1 || true
+    return 0
+  fi
+  st=$(stockage_vm); [[ -n "$st" ]] || erreur "Aucun stockage Proxmox n’accepte de disques de VM." "Indique-le avec HIBOU_STOCKAGE=<nom>."
+  sockets=$(lscpu | awk -F: '/^Socket\(s\)/ {gsub(/ /,"",$2); print $2}')
+  if [[ "$role" == forge ]]; then mem=$((HIBOU_RAM_FORGE * 1024)); coeurs="$HIBOU_CPU_FORGE"; sockets=1
+  else
+    # Par défaut tout l’hôte moins 16 Go et 4 fils ; HIBOU_RAM_GPU (Go) et HIBOU_CPU_GPU pour un hôte partagé (essais).
+    mem=$(( ${HIBOU_RAM_GPU:-0} > 0 ? HIBOU_RAM_GPU * 1024 : $(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo) - 16384 ))
+    coeurs=$(( ${HIBOU_CPU_GPU:-0} > 0 ? HIBOU_CPU_GPU / sockets : ($(nproc) - 4) / sockets ))
+  fi
+  local net="virtio,bridge=$HIBOU_PONT${HIBOU_VLAN:+,tag=$HIBOU_VLAN}" pfx="${HIBOU_RESEAU#*/}"
+  # Démarrage sécurisé désactivé (pre-enrolled-keys=0) : le module NVIDIA compilé par DKMS n’est pas signé.
+  qm create "$id" --name "$nom" --machine q35 --bios ovmf --efidisk0 "$st:1,efitype=4m,pre-enrolled-keys=0" \
+    --cpu host --sockets "$sockets" --cores "$coeurs" --numa $(( sockets > 1 )) --memory "$mem" --balloon 0 \
+    --net0 "$net" --scsihw virtio-scsi-single --ostype l26 --serial0 socket --onboot 1 --agent enabled=1,fstrim_cloned_disks=1 >/dev/null
+  qm set "$id" --scsi0 "$st:0,import-from=$b/extra/$IMAGE_CLOUD,discard=on,iothread=1,ssd=1" >/dev/null
+  qm resize "$id" scsi0 "${disque}G" >/dev/null
+  local cles; cles=$(mktemp); echo "$HIBOU_SSH_VM_PUB" > "$cles"
+  # ciupgrade 0 : pas de mise à jour au premier démarrage, il n’y a pas d’Internet.
+  qm set "$id" --ide2 "$st:cloudinit" --boot order=scsi0 --ciuser hibou --cipassword "$HIBOU_VM_MDP" --ciupgrade 0 \
+    --sshkeys "$cles" --ipconfig0 "ip=$ip/$pfx${HIBOU_PASSERELLE:+,gw=$HIBOU_PASSERELLE}" \
+    --nameserver "$HIBOU_IP_FORGE" --searchdomain "$DOMAINE" >/dev/null
+  rm -f "$cles"
+  if [[ "$role" != forge ]]; then
+    local i=0 slot
+    for slot in $(lspci -Dmm -d 10de: | awk '{print $1}' | sed 's/\.[0-7]$//' | sort -u); do
+      qm set "$id" --hostpci$i "$slot,pcie=1" >/dev/null; i=$((i + 1))
+    done
+    fait "$i cartes passées à la VM, toutes fonctions comprises."
+  fi
+  qm start "$id"
+  fait "VM $nom créée sur $st : $coeurs cœurs × $sockets, $((mem / 1024)) Go, ${disque} Go de disque, $ip."
+}
+
+# Cartes NVIDIA de l’hôte et cartes de la VM alignées (ajout de la deuxième RTX 6000 Ada, par exemple).
+cartes_vm() {  # rôle
+  local id="HIBOU_VMID_${1^^}" voulu actuel slot i=0 k
+  id="${!id}"
+  voulu=$(lspci -Dmm -d 10de: | awk '{print $1}' | sed 's/\.[0-7]$//' | sort -u | paste -sd' ')
+  actuel=$(qm config "$id" | awk -F'[ ,]' '/^hostpci[0-9]+:/ {print $2}' | sort -u | paste -sd' ')
+  if [[ "$voulu" == "$actuel" ]]; then note "Cartes de la VM inchangées."; return 0; fi
+  etape "Cartes de la VM : ${actuel:-aucune} → $voulu"
+  qm shutdown "$id" --timeout 180 >/dev/null 2>&1 || qm stop "$id"
+  for k in $(qm config "$id" | grep -oE '^hostpci[0-9]+'); do qm set "$id" --delete "$k" >/dev/null; done
+  for slot in $voulu; do qm set "$id" --hostpci$i "$slot,pcie=1" >/dev/null; i=$((i + 1)); done
+  qm start "$id"
+  fait "$i cartes passées à la VM."
+}
+
+copier_vers_vm() {  # rôle bundle adresse ; rsync ne transfère que ce qui a changé
+  local role="$1" b="$2" liste nom alias; liste=$(mktemp)
+  {
+    printf '%s\n' hibou config.env secrets.chiffre MANIFEST.md SHA256SUMS
+    (cd "$b" && find apt/ubuntu charte amorces -type f)
+    for nom in $(images_du_role "$role"); do printf 'images/%s.tar.zst\n' "$nom"; done
+    for alias in $(modeles_du_role "$role"); do (cd "$b" && find "models/$role/$alias" -type f); done
+    [[ "$role" == forge && -d "$b/mirror" ]] && (cd "$b" && find mirror -type f)
+  } > "$liste"
+  etape "Copie du bundle $role vers la VM"
+  # Modèles retirés du profil : effacés de la copie dans la VM, le reste n’est pas retransféré.
+  ssh_vm "$3" "rm -rf hibou-bundle/models/*.gguf; mkdir -p hibou-bundle/models/$role && touch hibou-bundle/.partiel && cd hibou-bundle/models/$role && for d in *; do case ' $(modeles_du_role "$role" | tr '\n' ' ') ' in *\" \$d \"*) ;; *) rm -rf \"\$d\" ;; esac; done"
+  rsync -a --info=progress2 -e "ssh -i /root/.ssh/hibou_ed25519 -o BatchMode=yes -o UserKnownHostsFile=/root/.ssh/hibou_known_hosts" \
+    --files-from="$liste" "$b/" "hibou@$3:hibou-bundle/"
+  rm -f "$liste"
+  fait "Copié dans ~hibou/hibou-bundle."
+}
+
+dans_la_vm() {  # adresse rôle phase
+  printf '%s\n' "$PHRASE" | ssh_vm "$1" \
+    "sudo HIBOU_SAUTER='${HIBOU_SAUTER:-}' HIBOU_MAJ='${HIBOU_MAJ:-}' HIBOU_PHASE='$3' HIBOU_SANS_VERIF=1 NO_COLOR='${NO_COLOR:-}' bash hibou-bundle/hibou installer $2 hibou-bundle" \
+    || erreur "L’installation dans la VM s’est arrêtée." "Les messages ci-dessus disent pourquoi. Relance la même commande : les étapes déjà faites sont rapides."
+}
+
+sur_proxmox() {  # rôle bundle
+  local role="$1" b="$2" ip; ip="HIBOU_IP_${role^^}"; ip="${!ip}"
+  if [[ "$role" == noeud ]]; then
+    saute verif || verifier "$b"; secrets "$b"
+    install -d -m 700 /root/.ssh; base64 -d <<< "$HIBOU_SSH_VM_B64" > /root/.ssh/hibou_ed25519; chmod 600 /root/.ssh/hibou_ed25519
+    preparer_hote "$b" noeud; realm_proxmox; return
+  fi
+  local etapes=("verif:Vérification des empreintes" "hote:Préparation de l’hôte Proxmox" "vm:Création de la VM" "copie:Copie du bundle dans la VM"
+                "socle:Socle de la VM (paquets, pilote, Docker)" "images:Chargement des images" "modeles:Copie des modèles" "config:Configuration et démarrage")
+  [[ "$role" == forge ]] && etapes=("${etapes[@]/#modeles:*}") && etapes+=("comptes:Comptes, dépôts et connexion unique" "miroir:Import du miroir de dépendances")
+  [[ "$role" != forge ]] && etapes+=("redemarrage:Redémarrage de la VM et contrôle des GPU" "evaluation:Évaluation des modèles depuis forge")
+  # Mise à jour : ni préparation de l’hôte, ni création de VM, ni comptes Forgejo (leurs secrets ne changent pas).
+  [[ -n "${HIBOU_MAJ:-}" ]] && etapes=("${etapes[@]/#hote:*}") && etapes=("${etapes[@]/#vm:*}") && etapes=("${etapes[@]/#comptes:*}")
+  local e propre=(); for e in "${etapes[@]}"; do [[ -n "$e" ]] && propre+=("$e"); done
+  proposer_sauts "${propre[@]}"
+  saute verif || verifier "$b"
+  secrets "$b"
+  install -d -m 700 /root/.ssh
+  base64 -d <<< "$HIBOU_SSH_VM_B64" > /root/.ssh/hibou_ed25519; chmod 600 /root/.ssh/hibou_ed25519
+  if [[ -n "${HIBOU_MAJ:-}" ]]; then
+    qm status "$(v=HIBOU_VMID_${role^^}; echo "${!v}")" >/dev/null 2>&1 || erreur "La VM $role n’existe pas." "Lance d’abord « hibou installer $role »."
+    qm set "$(v=HIBOU_VMID_${role^^}; echo "${!v}")" --agent enabled=1,fstrim_cloned_disks=1 >/dev/null   # pris en compte au prochain démarrage
+    [[ "$role" == forge ]] || { gpu_vfio; cartes_vm "$role"; }
+  else
+    if ! saute hote; then preparer_hote "$b" "$role"; [[ "$role" == forge ]] || { etape "Cartes NVIDIA pour la VM"; gpu_vfio; }; fi
+    if ! saute vm; then ssh-keygen -R "$ip" -f /root/.ssh/hibou_known_hosts >/dev/null 2>&1 || true; creer_vm "$role" "$b"; fi
+  fi
+  etape "Attente de la VM ($ip)"; attendre_ssh "$ip"; fait "La VM répond."
+  saute copie || copier_vers_vm "$role" "$b" "$ip"
+  if [[ "$role" == forge ]]; then dans_la_vm "$ip" forge ""; [[ -n "${HIBOU_MAJ:-}" ]] || realm_proxmox; return; fi
+  dans_la_vm "$ip" "$role" socle
+  # En mise à jour, on ne redémarre que si le noyau ou le pilote ont changé.
+  if [[ -n "${HIBOU_MAJ:-}" ]] && ! ssh_vm "$ip" 'test -f /var/run/reboot-required'; then HIBOU_SAUTER+=",redemarrage"; fi
+  if ! saute redemarrage; then
+    etape "Redémarrage de la VM sur le pilote NVIDIA"
+    ssh_vm "$ip" 'sudo systemctl reboot' || true; sleep 20; attendre_ssh "$ip"
+    ssh_vm "$ip" nvidia-smi -L || erreur "La VM ne voit pas ses cartes." "Dans la VM : sudo dmesg | grep -i nvidia. Sur l’hôte : dmesg | grep -i vfio."
+  fi
+  dans_la_vm "$ip" "$role" suite
+  [[ -n "${HIBOU_MAJ:-}" ]] || realm_proxmox
+  if ssh_vm "$ip" 'for i in $(seq 1 60); do curl -fsS localhost:8080/health >/dev/null && exit 0; sleep 5; done; exit 1'; then
+    fait "API du serveur $role en ligne."
+    if ! saute evaluation; then
+      ssh_vm "$HIBOU_IP_FORGE" "sudo systemd-run --unit hibou-eval-$role --collect -E NO_COLOR=1 /usr/local/lib/hibou/hibou evaluer $role /usr/local/lib/hibou" >/dev/null 2>&1 \
+        && note "Évaluation lancée sur forge (20 à 60 min) : sudo journalctl -fu hibou-eval-$role, puis le tableau « Évaluation » de Grafana." \
+        || note "Évaluation non lancée (forge injoignable). Sur forge : sudo /usr/local/lib/hibou/hibou evaluer $role /usr/local/lib/hibou"
+    fi
+  else
+    note "L’API ne répond pas encore. Dans la VM : docker compose -f /srv/hibou/compose.yaml logs --tail 50"
+  fi
+}
+
+# ─── Rôles dans les VM ──────────────────────────────────────────────────────
+indices_gpu() {  # rôle → IDX_LLM, IDX_IMG (listes JSON de chaînes)
+  local lignes=() l idx nom llm=() img=()
+  mapfile -t lignes < <(nvidia-smi --query-gpu=index,name --format=csv,noheader)
+  (( ${#lignes[@]} )) || erreur "nvidia-smi ne voit aucune carte." "Redémarre la VM, puis relance avec HIBOU_SAUTER=socle."
+  if [[ "$1" == doc && "${HIBOU_IMG_NB:-0}" != 0 ]]; then
+    if [[ "$HIBOU_IMG_GPU" == "$HIBOU_DOC_GPU" ]]; then img=("${lignes[-1]%%,*}")
+    else
+      for l in "${lignes[@]}"; do
+        idx="${l%%,*}"; nom="${l#*, }"
+        [[ " $nom " =~ [[:space:]]${HIBOU_IMG_GPU}[[:space:]] ]] && { img=("$idx"); break; }
+      done
+      (( ${#img[@]} )) || erreur "Je ne trouve pas la carte $HIBOU_IMG_GPU." "Cartes vues : ${lignes[*]}"
+    fi
+  fi
+  for l in "${lignes[@]}"; do idx="${l%%,*}"; [[ " ${img[*]} " == *" $idx "* ]] || llm+=("$idx"); done
+  IDX_LLM=$(printf '"%s",' "${llm[@]}"); IDX_LLM="[${IDX_LLM%,}]"
+  IDX_IMG=$(printf '"%s",' "${img[@]}"); IDX_IMG="[${IDX_IMG%,}]"
+  NB_LLM=${#llm[@]}
+}
+
+config_llama_swap() {  # rôle
+  local n="HIBOU_PROFIL_${1^^}" ligne alias ctx args base split=""
+  profil "$1" "${!n}"
+  if (( NB_LLM > 1 )); then split="--split-mode layer --tensor-split $(printf '1,%.0s' $(seq "$NB_LLM") | sed 's/,$//')"; fi
+  {
+    echo "# Généré par Hibou $VERSION_HIBOU : un utilisateur à la fois par modèle (-np 1), tout le contexte pour lui."
+    echo "healthCheckTimeout: 900"
+    echo "models:"
+    for ligne in "${MODELES_ROLE[@]}"; do
+      IFS='|' read -r alias _ _ ctx args <<< "$ligne"
+      servi "$args" || continue
+      # shellcheck disable=SC2059
+      [[ "$args" == *@ebauche* ]] && args="${args/@ebauche/$(printf -- "$ARGS_EBAUCHE" "$(gguf ebauche)")}"
+      base="/app/llama-server --port \${PORT} -m /models/$(gguf "$alias")"
+      [[ -n "$(mmproj "$alias")" ]] && base+=" --mmproj /models/$(mmproj "$alias")"
+      if [[ "$args" == *--embedding* ]]; then base+=" -c $ctx $args"
+      else base+=" -ngl 99 $split -c $ctx -np 1 -fa on -ctk q8_0 -ctv q8_0 --jinja $args"; fi
+      printf '  %s:\n    cmd: %s\n    ttl: 0\n' "$alias" "${base% }"
+    done
+    printf 'groups:\n%s\n' "$GROUPES"
+  } > /srv/hibou/llama-swap.yaml
+}
+
+config_priorite() {  # rôle : clés et rangs des utilisateurs, services d’Open WebUI et OpenCode
+  local u nom mail mdp eq k rang=0 rang_dev=""
+  local cles="{}" courriels="{}"
+  for u in "${HIBOU_UTILISATEURS[@]}"; do
+    IFS='|' read -r nom mail mdp eq k <<< "$u"
+    cles=$(jq -c --arg k "$k" --arg n "$nom" --argjson r "$rang" '. + {($k): {nom: $n, rang: $r}}' <<< "$cles")
+    courriels=$(jq -c --arg m "$mail" --arg n "$nom" --argjson r "$rang" '. + {($m): {nom: $n, rang: $r}}' <<< "$courriels")
+    [[ -z "$rang_dev" && ",$eq," == *,dev,* ]] && rang_dev=$rang
+    rang=$((rang + 1))
+  done
+  jq -n --argjson cles "$cles" --argjson courriels "$courriels" \
+    --arg w "$HIBOU_CLE_WEBUI" --arg o "$HIBOU_CLE_OPENCODE" --argjson rd "${rang_dev:-$rang}" --argjson dernier "$rang" \
+    --argjson ctx "$(for l in "${MODELES_ROLE[@]}"; do IFS='|' read -r a _ _ c x <<< "$l"; servi "$x" || continue; printf '%s\n%s\n' "$a" "$c"; done | jq -Rn '[inputs] | [range(0; length; 2) as $i | {(.[$i]): (.[$i+1] | tonumber)}] | add')" \
+    --arg r "${HIBOU_CLE_RELECTEUR:-$HIBOU_CLE_WEBUI}" \
+    '{cles: $cles, courriels: $courriels, contextes: $ctx, services: {($w): {nom: "open-webui", rang: $dernier}, ($r): {nom: "relecteur", rang: $dernier}, ($o): {nom: "opencode", rang: $rd}}}' \
+    > /srv/hibou/priorite.json
+  chmod 600 /srv/hibou/priorite.json
+}
+
+# Charge le modèle avec son ébauche ; si llama-server refuse la paire, on retire l’ébauche plutôt que de casser le modèle.
+verifier_speculatif() {
+  grep -q -- ' -md ' /srv/hibou/llama-swap.yaml || return 0
+  local modele; modele=$(grep -B1 -- ' -md ' /srv/hibou/llama-swap.yaml | grep -oE '^  [^ :]+' | tr -d ' ' | head -1)
+  etape "Décodage spéculatif : essai de $modele avec son ébauche"
+  local corps; corps=$(jq -nc --arg m "$modele" '{model:$m,max_tokens:16,messages:[{role:"user",content:"Écris une fonction Python qui additionne deux nombres."}]}')
+  local i
+  for i in $(seq 1 30); do curl -fsS localhost:8080/health >/dev/null 2>&1 && break; sleep 2; done
+  if curl -fsS -m 900 localhost:8080/v1/chat/completions -H "Authorization: Bearer $HIBOU_CLE_WEBUI" -H 'Content-Type: application/json' -d "$corps" | jq -e '.choices[0]' >/dev/null 2>&1; then
+    fait "$modele répond avec son ébauche. Le gain se lit dans Grafana (Génération, tokens/s) et dans l’évaluation."
+  else
+    sed -i -E 's# -md /models/[^ ]+ -ngld 99 --draft-max [0-9]+ --draft-min [0-9]+##' /srv/hibou/llama-swap.yaml
+    (cd /srv/hibou && docker compose restart llama-swap >/dev/null)
+    note "llama-server refuse l’ébauche pour $modele : retirée, le modèle tourne sans. Journal : docker compose -f /srv/hibou/compose.yaml logs llama-swap"
+  fi
+}
+
+installer_gpu() {  # rôle bundle
+  local role="$1" b="$2"
+  local apt_e; apt_e=$(sha256sum "$b/apt/ubuntu/Packages.gz" | cut -c1-64)
+  if [[ -n "${HIBOU_MAJ:-}" && "$(cat /srv/hibou/etat/apt 2>/dev/null)" == "$apt_e" ]]; then HIBOU_SAUTER+=",socle"; note "Paquets inchangés : socle sauté."; fi
+  if [[ "${HIBOU_PHASE:-}" != suite ]] && ! saute socle; then
+    etape "Pilote NVIDIA $NVIDIA_VERSION, Docker, NVIDIA Container Toolkit"
+    source_locale "$b/apt/ubuntu"
+    apt_hibou $PAQUETS_UBUNTU $PAQUETS_GPU
+    agrandir_systeme
+    verifier_dkms
+    docker_nvidia
+    client_reseau
+    pare_feu
+    install -d /srv/hibou/etat; echo "$apt_e" > /srv/hibou/etat/apt
+    fait "Socle installé."
+  fi
+  [[ "${HIBOU_PHASE:-}" == socle ]] && return 0
+  nvidia-smi >/dev/null 2>&1 || erreur "Le pilote NVIDIA n’est pas chargé." "Redémarre la VM, puis relance avec HIBOU_SAUTER=socle."
+  saute images  || { etape "Images";  charger_images "$b" "$role"; }
+  saute modeles || { etape "Modèles"; copier_modeles "$b" "$role"; }
+  saute config && return 0
+  etape "Configuration"
+  install -d /srv/hibou /srv/hibou/metriques
+  indices_gpu "$role"
+  config_llama_swap "$role"
+  config_priorite
+  local comfy=""
+  if [[ "$role" == doc && "${HIBOU_IMG_NB:-0}" != 0 ]]; then
+    local args; args=$(modele_image "$HIBOU_IMG_GO" | cut -d'|' -f4)
+    comfy="
+  comfyui:
+    image: hibou/comfyui:actuel
+    restart: unless-stopped
+    command: [${args:+\"$args\"}]
+    ports: [\"8188:8188\"]
+    volumes: [\"/srv/models/comfy:/opt/comfyui/models/checkpoints:ro\", \"comfy-sortie:/opt/comfyui/output\"]
+    deploy: { resources: { reservations: { devices: [{ driver: nvidia, device_ids: $IDX_IMG, capabilities: [gpu] }] } } }
+    networks: [externe]"
+  fi
+  cat > /srv/hibou/compose.yaml <<EOF
+name: hibou-$role
+services:
+  llama-swap:
+    image: ${IMAGES[llama-swap]}
+    restart: unless-stopped
+    volumes: ["/srv/models:/models:ro", "./llama-swap.yaml:/app/config.yaml:ro"]
+    deploy: { resources: { reservations: { devices: [{ driver: nvidia, device_ids: $IDX_LLM, capabilities: [gpu] }] } } }
+    networks: [interne]
+  priorite:
+    image: hibou/priorite:actuel
+    restart: unless-stopped
+    environment: { AMONT: "http://llama-swap:8080" }
+    volumes: ["./priorite.json:/etc/hibou/priorite.json:ro"]
+    ports: ["8080:8080"]
+    networks: [interne, externe]$comfy$(exportateurs)
+networks:
+  interne: { internal: true }
+  externe: {}
+volumes: { comfy-sortie: {} }
+EOF
+  service_demarrage /srv/hibou
+  if [[ -n "${HIBOU_MAJ:-}" ]]; then demarrer /srv/hibou --force-recreate; else demarrer /srv/hibou; fi
+  verifier_speculatif
+  fait "Serveur $role démarré : $NB_LLM carte(s) pour le LLM, modèle principal $PRINCIPAL. API via https://llm-$role.$DOMAINE"
+}
+
+supervision() {
+  install -d /srv/supervision/prometheus /srv/supervision/grafana/datasources /srv/supervision/grafana/dashboards /srv/supervision/metriques
+  cp /etc/ssl/certs/ca-certificates.crt /srv/supervision/ca.crt
+  cat > /srv/supervision/prometheus/prometheus.yml <<EOF
+global: { scrape_interval: 30s, evaluation_interval: 30s }
+alerting: { alertmanagers: [{ static_configs: [{ targets: ["alertmanager:9093"] }] }] }
+rule_files: [/etc/prometheus/regles.yml]
+scrape_configs:
+  - job_name: noeuds
+    static_configs:
+      - { targets: ["$HIBOU_IP_FORGE:9100"], labels: { machine: forge } }
+      - { targets: ["$HIBOU_IP_DOC:9100"], labels: { machine: doc } }
+      - { targets: ["$HIBOU_IP_DEV:9100"], labels: { machine: dev } }
+      - { targets: ["$HIBOU_IP_PVE_DOC:9100"], labels: { machine: pve-doc } }
+      - { targets: ["$HIBOU_IP_PVE_DEV:9100"], labels: { machine: pve-dev } }
+$(for ip in $HIBOU_IP_CLUSTER; do echo "      - { targets: [\"$ip:9100\"], labels: { machine: cluster } }"; done)
+  - job_name: gpu
+    static_configs: [{ targets: ["$HIBOU_IP_DOC:9835", "$HIBOU_IP_DEV:9835"] }]
+  - job_name: llm
+    scrape_interval: 15s
+    static_configs:
+      - { targets: ["$HIBOU_IP_DOC:8080"], labels: { serveur: doc } }
+      - { targets: ["$HIBOU_IP_DEV:8080"], labels: { serveur: dev } }
+  - job_name: smart
+    static_configs: [{ targets: [$(for ip in $HIBOU_IP_PVE_DOC $HIBOU_IP_PVE_DEV $HIBOU_IP_CLUSTER; do printf '"%s:9633",' "$ip"; done | sed 's/,$//')] }]
+EOF
+  cat > /srv/supervision/prometheus/regles.yml <<'EOF'
+groups:
+  - name: hibou
+    rules:
+      - alert: MachineInjoignable
+        expr: up == 0
+        for: 2m
+        annotations: { resume: "{{ $labels.instance }} ne répond plus depuis 2 minutes. Vérifie qu’elle est allumée et sur le réseau." }
+      - alert: DisquePresquePlein
+        expr: 100 * (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"}) > 85
+        for: 10m
+        annotations: { resume: "{{ $labels.instance }} {{ $labels.mountpoint }} est rempli à {{ printf \"%.0f\" $value }} %. Libère de la place." }
+      - alert: GpuTropChaud
+        expr: nvidia_smi_temperature_gpu > 85
+        for: 5m
+        annotations: { resume: "GPU {{ $labels.name }} sur {{ $labels.instance }} à {{ $value }} °C. Vérifie la ventilation." }
+      - alert: ErreurSmart
+        expr: smartctl_device_smart_status == 0
+        for: 5m
+        annotations: { resume: "Le disque {{ $labels.device }} de {{ $labels.instance }} signale une erreur SMART. Prévois son remplacement." }
+      - alert: SauvegardeEnRetard
+        expr: time() - hibou_sauvegarde_derniere_reussite_timestamp > 26 * 3600
+        for: 10m
+        annotations: { resume: "Aucune sauvegarde {{ $labels.type }} {{ $labels.vmid }} réussie depuis plus de 26 heures." }
+EOF
+  # shortcut: mise en forme par les modèles de ntfy (paramètres tpl, t, m) ; à vérifier sur la version de ntfy du bundle.
+  cat > /srv/supervision/alertmanager.yml <<'EOF'
+route: { receiver: ntfy, group_wait: 30s, group_interval: 5m, repeat_interval: 4h }
+receivers:
+  - name: ntfy
+    webhook_configs:
+      - url: "http://ntfy/hibou?tpl=yes&t=Hibou%20%C2%B7%20%7B%7B.status%7D%7D&m=%7B%7Brange%20.alerts%7D%7D%7B%7B.annotations.resume%7D%7D%0A%7B%7Bend%7D%7D"
+        send_resolved: true
+EOF
+  cat > /srv/supervision/grafana/datasources/prometheus.yaml <<'EOF'
+apiVersion: 1
+datasources:
+  - { name: Prometheus, uid: prometheus, type: prometheus, url: http://prometheus:9090, isDefault: true }
+EOF
+  cat > /srv/supervision/grafana/dashboards/hibou.yaml <<'EOF'
+apiVersion: 1
+providers:
+  - { name: hibou, folder: Hibou, type: file, options: { path: /etc/grafana/provisioning/dashboards } }
+EOF
+  cat > /srv/supervision/grafana/dashboards/hibou.json <<'EOF'
+{
+ "uid": "hibou",
+ "title": "Hibou · Vue d’ensemble",
+ "timezone": "browser",
+ "schemaVersion": 39,
+ "time": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "refresh": "1m",
+ "panels": [
+  {
+   "id": 1,
+   "type": "stat",
+   "title": "Machines joignables",
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 8,
+    "h": 4
+   },
+   "targets": [
+    {
+     "expr": "sum(up{job=\"noeuds\"})",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "#5CC8B8"
+     }
+    }
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   }
+  },
+  {
+   "id": 2,
+   "type": "stat",
+   "title": "Âge de la dernière sauvegarde (h)",
+   "gridPos": {
+    "x": 8,
+    "y": 0,
+    "w": 16,
+    "h": 4
+   },
+   "targets": [
+    {
+     "expr": "(time() - hibou_sauvegarde_derniere_reussite_timestamp) / 3600",
+     "legendFormat": "{{type}} {{vmid}}",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "decimals": 1,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#5CC8B8",
+        "value": null
+       },
+       {
+        "color": "#F0876B",
+        "value": 26
+       }
+      ]
+     }
+    }
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   }
+  },
+  {
+   "id": 3,
+   "type": "timeseries",
+   "title": "Température GPU (°C)",
+   "gridPos": {
+    "x": 0,
+    "y": 4,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "expr": "nvidia_smi_temperature_gpu",
+     "legendFormat": "{{instance}} {{name}} {{uuid}}",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "thresholdsStyle": {
+       "mode": "line"
+      }
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#F2B544",
+        "value": null
+       },
+       {
+        "color": "#F0876B",
+        "value": 85
+       }
+      ]
+     }
+    }
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   }
+  },
+  {
+   "id": 4,
+   "type": "timeseries",
+   "title": "Mémoire GPU utilisée (%)",
+   "gridPos": {
+    "x": 12,
+    "y": 4,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "expr": "100 * nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes",
+     "legendFormat": "{{instance}} {{name}}",
+     "refId": "A"
+    }
+   ],
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   }
+  },
+  {
+   "id": 5,
+   "type": "bargauge",
+   "title": "Remplissage des disques (%)",
+   "gridPos": {
+    "x": 0,
+    "y": 12,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "expr": "100 * (1 - node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay|squashfs\"})",
+     "legendFormat": "{{instance}} {{mountpoint}}",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "min": 0,
+     "max": 100,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#5CC8B8",
+        "value": null
+       },
+       {
+        "color": "#F2B544",
+        "value": 75
+       },
+       {
+        "color": "#F0876B",
+        "value": 85
+       }
+      ]
+     }
+    }
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   }
+  },
+  {
+   "id": 6,
+   "type": "timeseries",
+   "title": "Charge CPU (%)",
+   "gridPos": {
+    "x": 12,
+    "y": 12,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "expr": "100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))",
+     "legendFormat": "{{instance}}",
+     "refId": "A"
+    }
+   ],
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   }
+  }
+ ]
+}
+EOF
+  fait "Prometheus, alertes, Grafana, Uptime Kuma et ntfy configurés."
+}
+
+sauvegarde_forgejo() {
+  install -d /srv/forgejo/data/sauvegardes
+  cat > /usr/local/bin/hibou-sauvegarde-forgejo <<'EOF'
+#!/bin/sh
+# Sauvegarde applicative de Forgejo, 14 jours gardés, heure de réussite publiée pour Prometheus.
+set -e
+nom=forgejo-$(date +%Y%m%d-%H%M).zip
+docker exec -u git hibou-forge-forgejo-1 forgejo dump --type zip --file "/data/sauvegardes/$nom" --tempdir /data/tmp
+find /srv/forgejo/data/sauvegardes -name 'forgejo-*.zip' -mtime +14 -delete
+echo "hibou_sauvegarde_derniere_reussite_timestamp{type=\"forgejo\",vmid=\"\"} $(date +%s)" > /srv/supervision/metriques/forgejo.prom.tmp
+mv /srv/supervision/metriques/forgejo.prom.tmp /srv/supervision/metriques/forgejo.prom
+EOF
+  chmod 755 /usr/local/bin/hibou-sauvegarde-forgejo
+  cat > /etc/systemd/system/hibou-sauvegarde-forgejo.service <<'EOF'
+[Unit]
+Description=Hibou : sauvegarde de Forgejo
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/hibou-sauvegarde-forgejo
+EOF
+  cat > /etc/systemd/system/hibou-sauvegarde-forgejo.timer <<'EOF'
+[Unit]
+Description=Hibou : sauvegarde quotidienne de Forgejo
+[Timer]
+OnCalendar=*-*-* 02:00
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload && systemctl enable --now hibou-sauvegarde-forgejo.timer >/dev/null 2>&1
+  fait "Sauvegarde de Forgejo chaque nuit à 2 h dans /srv/forgejo/data/sauvegardes (14 jours)."
 }
 
 installer_forge() {
   local b="$1"
-  etape "Docker"
+  if ! saute socle; then
+  etape "Docker, DNS, heure"
   source_locale "$b/apt/ubuntu"
-  apt_hibou docker-ce docker-ce-cli containerd.io docker-compose-plugin chrony zstd jq rsync
-  fait "Docker installé."
-  etape "Images"; charger_images "$b" forge
-  etape "Forgejo et registre"
-  install -d /srv/forgejo/data /srv/registry
+  apt_hibou docker-ce docker-ce-cli containerd.io docker-compose-plugin chrony dnsmasq curl git openssh-client openssh-server zstd jq rsync cloud-guest-utils qemu-guest-agent
+  systemctl enable --now qemu-guest-agent >/dev/null 2>&1 || true
+  agrandir_systeme
+  local n
+  {
+    printf 'listen-address=%s\nbind-interfaces\nno-resolv\nlocal=/%s/\n' "$HIBOU_IP_FORGE" "$DOMAINE"
+    # Toutes les applications sont sur forge ; doc et dev ne servent que leur API, derrière forge.
+    for n in forge registry docs supervision etat alertes chat code llm-doc llm-dev; do printf 'address=/%s.%s/%s\n' "$n" "$DOMAINE" "$HIBOU_IP_FORGE"; done
+    printf 'address=/doc.%s/%s\naddress=/dev.%s/%s\n' "$DOMAINE" "$HIBOU_IP_DOC" "$DOMAINE" "$HIBOU_IP_DEV"
+    printf 'address=/pve-doc.%s/%s\naddress=/pve-dev.%s/%s\n' "$DOMAINE" "$HIBOU_IP_PVE_DOC" "$DOMAINE" "$HIBOU_IP_PVE_DEV"
+    n=1; for ip in $HIBOU_IP_CLUSTER; do printf 'address=/pve%s.%s/%s\n' "$n" "$DOMAINE" "$ip"; n=$((n + 1)); done
+  } > /etc/dnsmasq.d/hibou.conf
+  systemctl enable dnsmasq >/dev/null 2>&1; systemctl restart dnsmasq
+  printf 'local stratum 10\nallow %s\n' "$HIBOU_RESEAU" > /etc/chrony/conf.d/hibou.conf
+  systemctl restart chrony
+  resolveur
+  fait "Docker installé, DNS et serveur d’heure actifs sur $HIBOU_IP_FORGE."
+  fi
+  saute images || { etape "Images"; charger_images "$b" forge; }
+  if ! saute config; then
+  etape "Forgejo, registre, applications"
+  install -d /srv/forgejo/data/gitea /srv/forgejo/runner /srv/registry /srv/docs-site /srv/hibou /srv/workspace
+  chown 1000:1000 /srv/workspace
+  if [[ ! -s /srv/forgejo/secrets.env ]]; then
+    local s; umask 077
+    for s in SECRET_KEY INTERNAL_TOKEN; do
+      printf 'FORGEJO__security__%s=%s\n' "$s" "$(docker run --rm --entrypoint sh "${IMAGES[forgejo]}" -c "forgejo generate secret $s")"
+    done > /srv/forgejo/secrets.env
+    printf 'FORGEJO__oauth2__JWT_SECRET=%s\n' "$(docker run --rm --entrypoint sh "${IMAGES[forgejo]}" -c 'forgejo generate secret JWT_SECRET')" >> /srv/forgejo/secrets.env
+    umask 022
+  fi
+  rsync -a "$b/charte/forgejo/public/" /srv/forgejo/data/gitea/public/
+  rsync -a "$b/charte/" /srv/hibou/charte/
+  config_opencode
+  config_open_webui_env
+  page_erreur
   cat > /srv/forgejo/Caddyfile <<EOF
 {
 	local_certs
 }
+# Pages d’erreur aux couleurs de Hibou pour tous les sites.
+(hibou) {
+	handle_errors {
+		root * /srv/charte
+		rewrite * /erreur.html
+		templates
+		file_server
+	}
+}
+# Connexion unique par Forgejo pour les applications qui n’ont pas d’OIDC (ou pas le bon).
+# Argument : groupes Forgejo admis. À importer dans un bloc route, avant le service.
+(sso) {
+	handle /oauth2/* {
+		reverse_proxy oauth2-proxy:4180 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+	forward_auth oauth2-proxy:4180 {
+		uri /oauth2/auth?allowed_groups={args[0]}
+		header_up X-Real-IP {remote_host}
+		copy_headers X-Auth-Request-User X-Auth-Request-Email
+		@anonyme status 401
+		handle_response @anonyme {
+			redir * /oauth2/sign_in?rd={scheme}://{host}{uri}
+		}
+	}
+}
 forge.$DOMAINE {
+	import hibou
 	reverse_proxy forgejo:3000
 }
+# Registre en lecture seule pour le réseau ; les paquets et images des équipes vont dans Forgejo (avec ses comptes).
 registry.$DOMAINE {
+	import hibou
+	@ecriture not method GET HEAD
+	respond @ecriture "Registre en lecture seule." 403
 	reverse_proxy registry:5000
+}
+docs.$DOMAINE {
+	import hibou
+	route {
+		import sso hibou:doc,hibou:dev,hibou:owners
+		root * /srv/docs
+		file_server
+	}
+}
+supervision.$DOMAINE {
+	import hibou
+	reverse_proxy grafana:3000
+}
+etat.$DOMAINE {
+	import hibou
+	route {
+		import sso hibou:owners
+		reverse_proxy uptime-kuma:3001
+	}
+}
+alertes.$DOMAINE {
+	import hibou
+	route {
+		import sso hibou:owners
+		reverse_proxy ntfy:80
+	}
+}
+chat.$DOMAINE {
+	import hibou
+	reverse_proxy open-webui:8080
+}
+code.$DOMAINE {
+	import hibou
+	route {
+		import sso hibou:dev,hibou:owners
+		reverse_proxy opencode:4096
+	}
+}
+# API : la clé est vérifiée par le service de priorité de chaque serveur.
+llm-doc.$DOMAINE {
+	import hibou
+	reverse_proxy $HIBOU_IP_DOC:8080
+}
+llm-dev.$DOMAINE {
+	import hibou
+	reverse_proxy $HIBOU_IP_DEV:8080
 }
 EOF
   cat > /srv/forgejo/compose.yaml <<EOF
@@ -447,15 +2052,155 @@ services:
   forgejo:
     image: ${IMAGES[forgejo]}
     restart: unless-stopped
+    env_file: [/srv/forgejo/secrets.env]
     environment:
+      FORGEJO__security__INSTALL_LOCK: "true"
+      FORGEJO__database__DB_TYPE: sqlite3
       FORGEJO__server__DOMAIN: forge.$DOMAINE
       FORGEJO__server__ROOT_URL: https://forge.$DOMAINE/
       FORGEJO__server__SSH_PORT: "2222"
       FORGEJO__server__OFFLINE_MODE: "true"
       FORGEJO__service__DISABLE_REGISTRATION: "true"
-      FORGEJO__ui__DEFAULT_THEME: forgejo-dark
+      FORGEJO__service__REQUIRE_SIGNIN_VIEW: "true"
+      FORGEJO__oauth2__ENABLED: "true"
+      FORGEJO__actions__ENABLED: "true"
+      FORGEJO__actions__DEFAULT_ACTIONS_URL: self
+      # L’agent crée un projet en poussant vers hibou/<nouveau>.git ; le dépôt naît privé, branche main.
+      FORGEJO__repository__ENABLE_PUSH_CREATE_ORG: "true"
+      FORGEJO__repository__DEFAULT_PUSH_CREATE_PRIVATE: "true"
+      FORGEJO__repository__DEFAULT_BRANCH: main
+      FORGEJO__webhook__ALLOWED_HOST_LIST: relecteur   # seul hôte interne joignable par les webhooks
+      FORGEJO__DEFAULT__APP_NAME: "Hibou · Forge"
+      FORGEJO__ui__THEMES: hibou-nuit,hibou-brume,hibou-auto,forgejo-dark,forgejo-light
+      FORGEJO__ui__DEFAULT_THEME: hibou-nuit
     volumes: ["./data:/data"]
-    ports: ["2222:22"]
+    ports: ["2222:22", "127.0.0.1:3000:3000"]
+  runner:
+    image: ${IMAGES[forgejo-runner]}
+    profiles: [runner]          # démarré une fois enregistré
+    restart: unless-stopped
+    user: "0:0"
+    command: forgejo-runner daemon --config /data/config.yml
+    volumes: ["./runner:/data", "/var/run/docker.sock:/var/run/docker.sock"]
+  open-webui:
+    image: ${IMAGES[open-webui]}
+    profiles: [apps]            # démarré une fois les applications de connexion créées
+    restart: unless-stopped
+    env_file: [/srv/hibou/open-webui.env, { path: /srv/hibou/open-webui-oidc.env, required: false }]
+    ports: ["127.0.0.1:8081:8080"]
+    volumes:
+      - open-webui:/app/backend/data
+      - /srv/hibou/ca-bundle.crt:/etc/hibou/ca-bundle.crt:ro
+      - /srv/hibou/charte/open-webui/custom.css:/app/backend/open_webui/static/custom.css
+      - /srv/hibou/charte/open-webui/hibou:/app/backend/open_webui/static/hibou:ro
+      # shortcut: Open WebUI recopie ses icônes depuis /app/build/static au démarrage ; on remplace la source. À revérifier à chaque version.
+      - /srv/hibou/charte/open-webui/static/favicon.png:/app/build/static/favicon.png:ro
+      - /srv/hibou/charte/open-webui/static/favicon.svg:/app/build/static/favicon.svg:ro
+      - /srv/hibou/charte/open-webui/static/favicon-96x96.png:/app/build/static/favicon-96x96.png:ro
+      - /srv/hibou/charte/open-webui/static/favicon-dark.png:/app/build/static/favicon-dark.png:ro
+      - /srv/hibou/charte/open-webui/static/apple-touch-icon.png:/app/build/static/apple-touch-icon.png:ro
+      - /srv/hibou/charte/open-webui/static/splash.png:/app/build/static/splash.png:ro
+      - /srv/hibou/charte/open-webui/static/splash-dark.png:/app/build/static/splash-dark.png:ro
+      - /srv/hibou/charte/open-webui/static/logo.png:/app/build/static/logo.png:ro
+  opencode:
+    image: hibou/opencode:actuel
+    profiles: [apps]
+    restart: unless-stopped
+    volumes:
+      - /srv/workspace:/workspace
+      - /srv/hibou/opencode.json:/home/node/.config/opencode/opencode.json:ro
+      - /srv/hibou/charte/opencode/themes:/home/node/.config/opencode/themes:ro
+      - /srv/hibou/ssh:/home/node/.ssh:ro
+      - /srv/hibou/AGENTS.md:/home/node/.config/opencode/AGENTS.md:ro
+      - /srv/hibou/npmrc:/home/node/.npmrc:ro
+      - /srv/hibou/ca-bundle.crt:/etc/hibou/ca-bundle.crt:ro
+    env_file: [{ path: /srv/hibou/opencode.env, required: false }]
+    environment:
+      CURL_CA_BUNDLE: /etc/hibou/ca-bundle.crt
+      GIT_SSL_CAINFO: /etc/hibou/ca-bundle.crt
+      NODE_EXTRA_CA_CERTS: /etc/hibou/ca-bundle.crt
+      GIT_AUTHOR_NAME: hibou-dev
+      GIT_AUTHOR_EMAIL: hibou-dev@$DOMAINE
+      GIT_COMMITTER_NAME: hibou-dev
+      GIT_COMMITTER_EMAIL: hibou-dev@$DOMAINE
+  oauth2-proxy:
+    image: ${IMAGES[oauth2-proxy]}
+    profiles: [apps]
+    restart: unless-stopped
+    env_file: [{ path: /srv/hibou/code-oidc.env, required: false }]
+    environment:
+      OAUTH2_PROXY_PROVIDER: oidc
+      OAUTH2_PROXY_PROVIDER_DISPLAY_NAME: "Hibou · Forge"
+      OAUTH2_PROXY_OIDC_ISSUER_URL: https://forge.$DOMAINE
+      OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
+      OAUTH2_PROXY_REDIRECT_URL: https://code.$DOMAINE/oauth2/callback
+      OAUTH2_PROXY_SCOPE: openid email profile groups
+      # Mode vérification seule (forward_auth de Caddy) ; chaque site précise ses groupes.
+      OAUTH2_PROXY_ALLOWED_GROUPS: hibou:doc,hibou:dev,hibou:owners
+      OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+      OAUTH2_PROXY_UPSTREAMS: static://202
+      OAUTH2_PROXY_REVERSE_PROXY: "true"
+      OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
+      OAUTH2_PROXY_COOKIE_DOMAINS: .$DOMAINE
+      OAUTH2_PROXY_WHITELIST_DOMAINS: .$DOMAINE
+      OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+      OAUTH2_PROXY_CUSTOM_SIGN_IN_LOGO: /etc/hibou/logo.svg
+      OAUTH2_PROXY_BANNER: "Hibou"
+      OAUTH2_PROXY_FOOTER: "-"
+      SSL_CERT_FILE: /etc/hibou/ca-bundle.crt
+    volumes: ["/srv/hibou/ca-bundle.crt:/etc/hibou/ca-bundle.crt:ro", "/srv/hibou/charte/commun/logos/symbole-sur-nuit.svg:/etc/hibou/logo.svg:ro"]
+  relecteur:
+    image: hibou/relecteur:actuel
+    profiles: [apps]
+    restart: unless-stopped
+    env_file: [{ path: /srv/hibou/relecteur.env, required: false }]
+  prometheus:
+    image: ${IMAGES[prometheus]}
+    restart: unless-stopped
+    command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.retention.time=30d]
+    volumes: ["/srv/supervision/prometheus:/etc/prometheus:ro", "prometheus:/prometheus"]
+  alertmanager:
+    image: ${IMAGES[alertmanager]}
+    restart: unless-stopped
+    volumes: ["/srv/supervision/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro"]
+  grafana:
+    image: ${IMAGES[grafana]}
+    restart: unless-stopped
+    env_file: [{ path: /srv/supervision/grafana.env, required: false }]
+    environment:
+      GF_SERVER_ROOT_URL: https://supervision.$DOMAINE/
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_USERS_DEFAULT_THEME: dark
+      GF_BRANDING_APP_TITLE: "Hibou · Supervision"
+    volumes:
+      - grafana:/var/lib/grafana
+      - /srv/supervision/grafana:/etc/grafana/provisioning:ro
+      - /srv/supervision/ca.crt:/etc/hibou/ca.crt:ro
+      # shortcut: logo et icônes remplacés dans l’image (la marque blanche est réservée à Grafana Enterprise). À revérifier à chaque version.
+      - /srv/hibou/charte/commun/logos/symbole-sur-nuit.svg:/usr/share/grafana/public/img/grafana_icon.svg:ro
+      - /srv/hibou/charte/open-webui/static/favicon.png:/usr/share/grafana/public/img/fav32.png:ro
+      - /srv/hibou/charte/open-webui/static/apple-touch-icon.png:/usr/share/grafana/public/img/apple-touch-icon.png:ro
+  uptime-kuma:
+    image: ${IMAGES[uptime-kuma]}
+    restart: unless-stopped
+    environment: { NODE_EXTRA_CA_CERTS: /etc/hibou/ca.crt }
+    volumes: ["uptime-kuma:/app/data", "/srv/supervision/ca.crt:/etc/hibou/ca.crt:ro"]
+  ntfy:
+    image: ${IMAGES[ntfy]}
+    restart: unless-stopped
+    command: serve
+    environment: { NTFY_BASE_URL: "https://alertes.$DOMAINE", NTFY_CACHE_FILE: /var/cache/ntfy/cache.db }
+    volumes: ["ntfy:/var/cache/ntfy"]
+  node-exporter:
+    image: ${IMAGES[node-exporter]}
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    command: [--path.rootfs=/host, --collector.textfile.directory=/textfile]
+    volumes: ["/:/host:ro,rslave", "/srv/supervision/metriques:/textfile:ro"]
   registry:
     image: ${IMAGES[registry]}
     restart: unless-stopped
@@ -464,57 +2209,709 @@ services:
     image: ${IMAGES[caddy]}
     restart: unless-stopped
     ports: ["443:443"]
-    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy:/data"]
-volumes: { caddy: {} }
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy:/data", "/srv/docs-site:/srv/docs:ro", "/srv/hibou/charte/caddy:/srv/charte:ro"]
+volumes: { caddy: {}, prometheus: {}, grafana: {}, uptime-kuma: {}, ntfy: {}, open-webui: {} }
 EOF
-  (cd /srv/forgejo && docker compose up -d --quiet-pull 2>/dev/null)
+  chmod 600 /srv/forgejo/compose.yaml
+  [[ -f /srv/hibou/ca-bundle.crt ]] || cp /etc/ssl/certs/ca-certificates.crt /srv/hibou/ca-bundle.crt
+  supervision
+  supervision_evaluation
+  sauvegarde_forgejo
+  demarrer /srv/forgejo
+  chown -R 1000:1000 /srv/forgejo/data/gitea/public
   fait "Forgejo démarré : https://forge.$DOMAINE"
-  note "Crée le premier compte administrateur : docker exec -u git hibou-forge-forgejo-1 forgejo admin user create --admin --username <nom> --email <adresse> --random-password"
-  note "Racine de l’autorité interne à installer sur les postes : docker cp hibou-forge-caddy-1:/data/caddy/pki/authorities/local/root.crt ."
+  fi
+  if [[ -n "${HIBOU_MAJ:-}" ]]; then
+    demarrer /srv/forgejo --force-recreate
+    ADMIN="$HIBOU_ADMIN_NOM"; MDP="$HIBOU_ADMIN_MDP"
+    etape "Open WebUI : modèles rebranchés sur les modèles installés"
+    amorcer_open_webui "$b" "" || note "Open WebUI n’a pas tout accepté : vérifie les modèles Hibou dans son espace de travail."
+  else
+    saute comptes || configurer "$b"
+  fi
+  saute miroir || importer_miroir "$b"
+}
+
+# Paquets du bundle publiés dans Forgejo (organisation hibou), depuis l’image hibou/miroir.
+importer_miroir() {  # bundle
+  local b="${1:-$ICI_HIBOU}"
+  [[ -d "$b/mirror" ]] || { [[ "${HIBOU_MIROIR:-0}" == 1 ]] && note "Pas de dossier mirror dans le bundle : miroir sauté."; return 0; }
+  exiger_root; secrets "$b"
+  etape "Miroir de dépendances vers Forgejo"
+  docker image inspect hibou/miroir:actuel >/dev/null 2>&1 || zstd -dc "$b/images/miroir.tar.zst" | docker load -q >/dev/null
+  # Le démon Docker de forge pousse les images vers forge.<domaine> : il doit connaître l’autorité interne.
+  install -d "/etc/docker/certs.d/forge.$DOMAINE"
+  cp /srv/hibou/hibou-ca.crt "/etc/docker/certs.d/forge.$DOMAINE/ca.crt"
+  local jeton
+  jeton=$(curl -fsS -u "$HIBOU_ADMIN_NOM:$HIBOU_ADMIN_MDP" -H 'Content-Type: application/json' -X POST \
+    "http://127.0.0.1:3000/api/v1/users/$HIBOU_ADMIN_NOM/tokens" \
+    -d "{\"name\":\"miroir-$(date +%Y%m%d%H%M%S)\",\"scopes\":[\"write:package\",\"write:repository\",\"write:organization\"]}" | jq -r .sha1) \
+    || erreur "Forgejo refuse de créer le jeton d’import." "Vérifie que forge est configurée (hibou configurer)."
+  docker run --rm --network hibou-forge_default -v "$b/mirror:/m:ro" -v /var/run/docker.sock:/var/run/docker.sock \
+    hibou/miroir:actuel push --dir /m --url http://forgejo:3000 --owner hibou \
+    --user "$HIBOU_ADMIN_NOM" --password "$HIBOU_ADMIN_MDP" --token "$jeton" --registry "forge.$DOMAINE" \
+    || note "Une partie du miroir n’est pas passée : relis les lignes « ÉCHEC » ci-dessus, puis relance « hibou miroir »."
+  curl -fsS -u "$HIBOU_ADMIN_NOM:$HIBOU_ADMIN_MDP" -X DELETE \
+    "http://127.0.0.1:3000/api/v1/users/$HIBOU_ADMIN_NOM/tokens/$(curl -fsS -u "$HIBOU_ADMIN_NOM:$HIBOU_ADMIN_MDP" \
+    "http://127.0.0.1:3000/api/v1/users/$HIBOU_ADMIN_NOM/tokens" | jq -r '[.[] | select(.name | startswith("miroir-"))] | last | .id')" >/dev/null 2>&1 || true
+  fait "Paquets publiés dans Forgejo : https://forge.$DOMAINE/hibou/-/packages"
+}
+
+consignes_agent() {  # AGENTS.md global d’OpenCode : ton de la charte et circuit Forgejo
+  cat > /srv/hibou/AGENTS.md <<EOF
+# Hibou : consignes pour l'agent
+
+Tu travailles pour Hibou, une IA locale et hors ligne. Rien ne sort de ce réseau.
+
+## Ton
+- Réponds en français, en tutoyant. Phrases courtes. Calme, précis, discret.
+- Dis ce que tu as fait, pas ce que tu ressens.
+- Pas de point d'exclamation, pas d'émoji, pas de superlatif. Une majuscule initiale seulement dans les titres.
+- Être hors ligne est un état normal. Ne t'excuse pas de ne pas avoir Internet.
+
+## Travail
+- Lis un fichier avant de le modifier. Propose le plus petit changement qui règle le problème.
+- Montre les commandes que tu lances. Ne supprime rien sans qu'on te le demande.
+- Dans un projet existant, garde son style, ses outils et ses conventions.
+- Quand tu n'es pas sûr, pose une seule question précise.
+
+## Forgejo (https://forge.$DOMAINE, organisation hibou)
+Les projets vivent dans /workspace/<projet>. Tu es le compte hibou-dev. Jeton : \$FORGEJO_TOKEN.
+
+- Projet existant : \`git clone git@forge.$DOMAINE:hibou/<projet>.git /workspace/<projet>\`
+- Nouveau projet : crée le dépôt, puis clone-le :
+  \`curl -fsS -H "Authorization: token \$FORGEJO_TOKEN" -H 'Content-Type: application/json' -d '{"name":"<projet>","private":true,"auto_init":true,"default_branch":"main"}' \$FORGEJO_URL/api/v1/orgs/hibou/repos\`
+- Jamais de push sur main. Travaille sur une branche \`agent/<sujet>\`, pousse-la, puis ouvre une pull request :
+  \`curl -fsS -H "Authorization: token \$FORGEJO_TOKEN" -H 'Content-Type: application/json' -d '{"head":"agent/<sujet>","base":"main","title":"<titre>","body":"<ce qui change et comment le vérifier>"}' \$FORGEJO_URL/api/v1/repos/hibou/<projet>/pulls\`
+- Donne l'adresse de la pull request à la fin. Une personne la relit et la fusionne.
+EOF
+  chmod 644 /srv/hibou/AGENTS.md
+}
+
+page_erreur() {  # gabarit Caddy (templates) avec les jetons, polices et symbole de la charte
+  install -d /srv/hibou/charte/caddy
+  # Tout est intégré à la page : en cas d’erreur, les autres chemins partent vers le service en panne.
+  local c=/srv/hibou/charte/commun f
+  cp "$c/logos/symbole-sur-nuit.svg" /srv/hibou/charte/caddy/
+  {
+    for f in "Fraunces|Fraunces-600|600" "Inter|Inter-variable|100 900" "JetBrains Mono|JetBrainsMono-500|500"; do
+      IFS='|' read -r nom fic poids <<< "$f"
+      printf '@font-face { font-family: "%s"; src: url(data:font/woff2;base64,%s) format("woff2"); font-weight: %s; }\n' "$nom" "$(base64 -w0 "$c/fonts/$fic.woff2")" "$poids"
+    done
+  } > /srv/hibou/charte/caddy/polices.css
+  cat > /srv/hibou/charte/caddy/erreur.html <<'HTML'
+<!doctype html>
+<html lang="fr" data-theme="nuit">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hibou · {{placeholder "http.error.status_code"}}</title>
+<style>
+{{include "/polices.css"}}
+:root { --fond: #0F1420; --surface: #171E2D; --filet: #2F3B52; --texte: #E9E4D8; --texte-doux: #8A93A6; --accent: #F2B544; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--fond); color: var(--texte); font: 16px/1.5 Inter, system-ui, sans-serif; }
+main { max-width: 32rem; padding: 2.5rem 2rem; background: var(--surface); border: 1px solid var(--filet); border-radius: 14px; text-align: center; }
+.symbole svg { width: 72px; height: 72px; }
+h1 { font: 600 2rem/1.2 Fraunces, Georgia, serif; margin: 1rem 0 .5rem; }
+code { font-family: "JetBrains Mono", monospace; color: var(--accent); }
+p { color: var(--texte-doux); margin: .25rem 0; }
+</style>
+</head>
+<body><main>
+<div class="symbole" aria-hidden="true">{{include "/symbole-sur-nuit.svg"}}</div>
+<h1>Ce service ne répond pas</h1>
+<p>Erreur <code>{{placeholder "http.error.status_code"}}</code> sur <code>{{.Host}}</code>.</p>
+<p>Il démarre peut-être encore. Réessaie dans une minute ; sinon, regarde https://supervision.</p>
+</main></body>
+</html>
+HTML
+}
+
+# Évaluation : copie locale de l’outil, minuterie hebdomadaire, tableau Grafana et alertes.
+supervision_evaluation() {
+  install -d /usr/local/lib/hibou
+  rsync -a "$ICI_HIBOU/hibou" "$ICI_HIBOU/config.env" /usr/local/lib/hibou/
+  rsync -a --exclude resultats "$ICI_HIBOU/amorces/hibou-eval" /usr/local/lib/hibou/amorces/
+  cat > /etc/systemd/system/hibou-eval.service <<'EOF'
+[Unit]
+Description=Hibou : évaluation des modèles doc et dev
+After=docker.service network-online.target
+[Service]
+Type=oneshot
+Environment=NO_COLOR=1
+ExecStart=/usr/local/lib/hibou/hibou evaluer tout /usr/local/lib/hibou
+EOF
+  cat > /etc/systemd/system/hibou-eval.timer <<'EOF'
+[Unit]
+Description=Hibou : évaluation hebdomadaire (dimanche 4 h, après la sauvegarde)
+[Timer]
+OnCalendar=Sun *-*-* 04:00
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload && systemctl enable --now hibou-eval.timer >/dev/null 2>&1
+  cat >> /srv/supervision/prometheus/regles.yml <<'EOF'
+      - alert: EvaluationEnRecul
+        expr: hibou_eval_score < 0.5
+        for: 1h
+        annotations: { resume: "{{ $labels.modele }} ({{ $labels.serveur }}) ne réussit que {{ $value | humanizePercentage }} des tâches {{ $labels.famille }}. Compare avec l’évaluation précédente dans hibou-eval." }
+      - alert: EvaluationAncienne
+        expr: time() - hibou_eval_derniere_timestamp > 8 * 86400
+        for: 1h
+        annotations: { resume: "Le serveur {{ $labels.serveur }} n’a pas été évalué depuis plus de 8 jours. Regarde : journalctl -u hibou-eval." }
+EOF
+  local panneau='{"type":"prometheus","uid":"prometheus"}'
+  jq -n --argjson ds "$panneau" '{
+    uid: "hibou-eval", title: "Hibou · Évaluation des modèles", timezone: "browser", schemaVersion: 39,
+    time: {from: "now-90d", to: "now"}, refresh: "5m",
+    panels: [
+      {id: 1, type: "bargauge", title: "Tâches réussies", datasource: $ds, gridPos: {x: 0, y: 0, w: 12, h: 10},
+       targets: [{expr: "hibou_eval_score", legendFormat: "{{serveur}} · {{modele}} · {{famille}}", refId: "A"}],
+       options: {orientation: "horizontal", displayMode: "basic"},
+       fieldConfig: {defaults: {unit: "percentunit", min: 0, max: 1, thresholds: {mode: "absolute",
+         steps: [{color: "#F0876B", value: null}, {color: "#F2B544", value: 0.5}, {color: "#5CC8B8", value: 0.8}]}}}},
+      {id: 2, type: "bargauge", title: "Vitesse (tokens/s)", datasource: $ds, gridPos: {x: 12, y: 0, w: 12, h: 10},
+       targets: [{expr: "hibou_eval_tokens_par_seconde", legendFormat: "{{serveur}} · {{modele}} · {{famille}}", refId: "A"}],
+       options: {orientation: "horizontal", displayMode: "basic"},
+       fieldConfig: {defaults: {unit: "none", color: {mode: "fixed", fixedColor: "#F2B544"}}}},
+      {id: 3, type: "timeseries", title: "Évolution des scores", datasource: $ds, gridPos: {x: 0, y: 10, w: 18, h: 9},
+       targets: [{expr: "hibou_eval_score", legendFormat: "{{serveur}} · {{modele}} · {{famille}}", refId: "A"}],
+       fieldConfig: {defaults: {unit: "percentunit", min: 0, max: 1}}},
+      {id: 4, type: "stat", title: "Dernière évaluation (jours)", datasource: $ds, gridPos: {x: 18, y: 10, w: 6, h: 9},
+       targets: [{expr: "(time() - hibou_eval_derniere_timestamp) / 86400", legendFormat: "{{serveur}}", refId: "A"}],
+       fieldConfig: {defaults: {decimals: 1, color: {mode: "fixed", fixedColor: "#5CC8B8"}}}}
+    ]}' > /srv/supervision/grafana/dashboards/evaluation.json
+  fait "Évaluation chaque dimanche à 4 h, tableau « Hibou · Évaluation des modèles » et alertes en place."
+  supervision_llm
+}
+
+supervision_llm() {
+  cat >> /srv/supervision/prometheus/regles.yml <<'EOF'
+      - alert: AttenteLongue
+        expr: hibou_llm_attente_derniere_secondes > 120
+        for: 1m
+        annotations: { resume: "Sur {{ $labels.serveur }}, la dernière requête a attendu {{ $value | humanizeDuration }} son tour pour {{ $labels.modele }}. Deux personnes se partagent le serveur." }
+      - alert: ContexteSature
+        expr: hibou_llm_contexte_utilise / hibou_llm_contexte_max > 0.9
+        for: 1m
+        annotations: { resume: "{{ $labels.modele }} ({{ $labels.serveur }}) a utilisé {{ $value | humanizePercentage }} de son contexte. Au-delà, le début de la conversation est perdu : ouvre une nouvelle conversation." }
+EOF
+  local ds='{"type":"prometheus","uid":"prometheus"}' leg='{{serveur}} · {{modele}}'
+  jq -n --argjson ds "$ds" --arg leg "$leg" '{
+    uid: "hibou-llm", title: "Hibou · LLM en direct", timezone: "browser", schemaVersion: 39,
+    time: {from: "now-6h", to: "now"}, refresh: "15s",
+    panels: [
+      {id: 1, type: "table", title: "Modèles chargés", datasource: $ds, gridPos: {x: 0, y: 0, w: 8, h: 7},
+       targets: [{expr: "hibou_llm_charge == 1", format: "table", instant: true, refId: "A"}],
+       transformations: [{id: "organize", options: {excludeByName: {Time: true, Value: true, __name__: true, instance: true, job: true}}}]},
+      {id: 2, type: "stat", title: "En file d’attente", datasource: $ds, gridPos: {x: 8, y: 0, w: 8, h: 7},
+       targets: [{expr: "sum by (serveur) (hibou_llm_en_attente)", legendFormat: "{{serveur}}", refId: "A"}],
+       fieldConfig: {defaults: {thresholds: {mode: "absolute", steps: [{color: "#5CC8B8", value: null}, {color: "#F2B544", value: 1}]}}}},
+      {id: 3, type: "bargauge", title: "Contexte utilisé (dernière requête)", datasource: $ds, gridPos: {x: 16, y: 0, w: 8, h: 7},
+       targets: [{expr: "hibou_llm_contexte_utilise / hibou_llm_contexte_max", legendFormat: $leg, refId: "A"}],
+       options: {orientation: "horizontal", displayMode: "basic"},
+       fieldConfig: {defaults: {unit: "percentunit", min: 0, max: 1, thresholds: {mode: "absolute",
+         steps: [{color: "#5CC8B8", value: null}, {color: "#F2B544", value: 0.7}, {color: "#F0876B", value: 0.9}]}}}},
+      {id: 4, type: "timeseries", title: "Génération (tokens/s)", datasource: $ds, gridPos: {x: 0, y: 7, w: 12, h: 8},
+       targets: [{expr: "rate(hibou_llm_tokens_generes_total[5m]) / rate(hibou_llm_generation_secondes_total[5m])", legendFormat: $leg, refId: "A"}],
+       fieldConfig: {defaults: {color: {mode: "palette-classic"}}}},
+      {id: 5, type: "timeseries", title: "Lecture du prompt (tokens/s)", datasource: $ds, gridPos: {x: 12, y: 7, w: 12, h: 8},
+       targets: [{expr: "rate(hibou_llm_tokens_prompt_total[5m]) / rate(hibou_llm_prompt_secondes_total[5m])", legendFormat: $leg, refId: "A"}]},
+      {id: 6, type: "timeseries", title: "Attente moyenne avant réponse, par utilisateur (s)", datasource: $ds, gridPos: {x: 0, y: 15, w: 12, h: 8},
+       targets: [{expr: "sum by (serveur, utilisateur) (rate(hibou_llm_attente_secondes_total[15m])) / sum by (serveur, utilisateur) (rate(hibou_llm_requetes_total[15m]))", legendFormat: "{{serveur}} · {{utilisateur}}", refId: "A"}],
+       fieldConfig: {defaults: {unit: "s"}}},
+      {id: 7, type: "bargauge", title: "Requêtes sur 24 h, par utilisateur", datasource: $ds, gridPos: {x: 12, y: 15, w: 12, h: 8},
+       targets: [{expr: "sum by (serveur, utilisateur) (increase(hibou_llm_requetes_total[24h]))", legendFormat: "{{serveur}} · {{utilisateur}}", refId: "A"}],
+       options: {orientation: "horizontal", displayMode: "basic"},
+       fieldConfig: {defaults: {decimals: 0, color: {mode: "fixed", fixedColor: "#F2B544"}}}}
+    ]}' > /srv/supervision/grafana/dashboards/llm.json
+  fait "Tableau « Hibou · LLM en direct » et alertes d’attente et de contexte en place."
+}
+
+# Évalue les modèles d’un serveur avec hibou-eval, depuis forge (code exécuté dans un conteneur sans réseau).
+evaluer() {  # doc|dev|tout [dossier]
+  local quoi="${1:-tout}" b="${2:-$ICI_HIBOU}" role n ligne alias motifs args ip vision familles modeles
+  [[ -r /srv/hibou/secrets/cle-eval ]] || erreur "Je ne trouve pas la clé d’évaluation." "Lance cette commande sur forge, en root, une fois forge installée."
+  [[ "$quoi" =~ ^(doc|dev|tout)$ ]] || erreur "Serveur inconnu : $quoi." "Choisis doc, dev ou tout."
+  local travail=/srv/hibou/eval
+  install -d "$travail"; rsync -a --exclude resultats "$b/amorces/hibou-eval/" "$travail/"
+  for role in doc dev; do
+    [[ "$quoi" == tout || "$quoi" == "$role" ]] || continue
+    n="HIBOU_PROFIL_${role^^}"; profil "$role" "${!n}"
+    modeles=(); vision=0
+    for ligne in "${MODELES_ROLE[@]}"; do
+      IFS='|' read -r alias _ motifs _ args <<< "$ligne"
+      [[ "$alias" == fim || "$args" == *--embedding* ]] || ! servi "$args" && continue
+      modeles+=("$alias"); [[ "$motifs" == *mmproj* ]] && vision=1
+    done
+    familles=code; [[ "$role" == doc ]] && familles="doc$( (( vision )) && echo ,vision)"
+    ip="HIBOU_IP_${role^^}"
+    etape "Évaluation du serveur $role : ${modeles[*]} ($familles)"
+    # Clé de service d’Open WebUI : dernier rang, l’évaluation passe toujours après les utilisateurs.
+    (cd "$travail" && python3 evaluer.py --api "http://${!ip}:8080/v1" --cle "$(cat /srv/hibou/secrets/cle-eval)" \
+      --modeles "$(IFS=,; echo "${modeles[*]}")" --familles "$familles" --reference "$PRINCIPAL" \
+      --serveur "$role" --metriques "/srv/supervision/metriques/eval-$role.prom") \
+      || note "L’évaluation de $role s’est arrêtée ; les résultats partiels sont dans $travail/resultats."
+  done
+  fait "Résultats dans $travail/resultats (CSV et réponses brutes), scores dans https://supervision.$DOMAINE"
+}
+
+config_opencode() {  # modèles du serveur dev, avec leurs vraies limites de contexte
+  local n="HIBOU_PROFIL_DEV" ligne alias ctx args modeles="{}"
+  profil dev "${!n}"
+  for ligne in "${MODELES_ROLE[@]}"; do
+    IFS='|' read -r alias _ _ ctx args <<< "$ligne"
+    [[ "$alias" == fim ]] || ! servi "$args" && continue
+    # Sans limite déclarée, OpenCode suppose un contexte inconnu et compacte trop tard ou trop tôt.
+    modeles=$(jq -c --arg a "$alias" --argjson c "$ctx" --argjson o $(( ctx >= 131072 ? 32768 : 16384 )) \
+      '. + {($a): {name: $a, tool_call: true, limit: {context: $c, output: $o}}}' <<< "$modeles")
+  done
+  jq -n --arg p "$PRINCIPAL" --arg u "http://$HIBOU_IP_DEV:8080/v1" --arg k "$HIBOU_CLE_OPENCODE" --argjson m "$modeles" '{
+    "$schema": "https://opencode.ai/config.json", theme: "hibou", autoupdate: false, share: "disabled",
+    model: ("hibou/" + $p),
+    provider: {hibou: {npm: "@ai-sdk/openai-compatible", name: "Hibou", options: {baseURL: $u, apiKey: $k}, models: $m}},
+    permission: {edit: "allow", bash: {"*": "ask", "git status*": "allow", "git diff*": "allow", "git log*": "allow",
+      "ls*": "allow", "cat*": "allow", "grep*": "allow", "rg*": "allow", "git push*main*": "deny", "sudo*": "deny"}}
+  }' > /srv/hibou/opencode.json
+  chmod 644 /srv/hibou/opencode.json
+}
+
+config_open_webui_env() {
+  local img=""
+  if [[ "${HIBOU_IMG_NB:-0}" != 0 ]]; then
+    local f t; IFS='|' read -r _ f t _ <<< "$(modele_image "$HIBOU_IMG_GO")"
+    img="ENABLE_IMAGE_GENERATION=true
+IMAGE_GENERATION_ENGINE=comfyui
+COMFYUI_BASE_URL=http://$HIBOU_IP_DOC:8188
+IMAGE_GENERATION_MODEL=$f
+IMAGE_SIZE=$t"
+  fi
+  umask 077
+  install -d -m 700 /srv/hibou/secrets
+  printf '%s' "$HIBOU_CLE_WEBUI" > /srv/hibou/secrets/cle-eval
+  cat > /srv/hibou/open-webui.env <<EOF
+WEBUI_NAME=Hibou
+WEBUI_URL=https://chat.$DOMAINE
+OFFLINE_MODE=true
+HF_HUB_OFFLINE=1
+ENABLE_OLLAMA_API=false
+OPENAI_API_BASE_URLS=http://$HIBOU_IP_DOC:8080/v1;http://$HIBOU_IP_DEV:8080/v1
+OPENAI_API_KEYS=$HIBOU_CLE_WEBUI;$HIBOU_CLE_WEBUI
+ENABLE_FORWARD_USER_INFO_HEADERS=true
+RAG_EMBEDDING_ENGINE=openai
+RAG_OPENAI_API_BASE_URL=http://$HIBOU_IP_DOC:8080/v1
+RAG_OPENAI_API_KEY=$HIBOU_CLE_WEBUI
+RAG_EMBEDDING_MODEL=qwen3-embedding
+ENABLE_SIGNUP=false
+ENABLE_INITIAL_ADMIN_SIGNUP=true
+ENABLE_API_KEY=true
+ENABLE_API_KEYS=true
+DEFAULT_MODELS=hibou-procedure
+DEFAULT_PROMPT_SUGGESTIONS=$(jq -c . <<'JSON'
+[{"title":["Résumer","un texte"],"content":"Résume le texte suivant en cinq phrases courtes :\n\n"},
+ {"title":["Corriger","l'orthographe et la grammaire"],"content":"Corrige l'orthographe et la grammaire du texte suivant, puis montre ce que tu as changé :\n\n"},
+ {"title":["Reformuler","avec un ton plus clair"],"content":"Reformule le texte suivant avec un ton plus clair et plus direct :\n\n"},
+ {"title":["Rédiger","une procédure"],"content":"Rédige une procédure pour :\n\n"},
+ {"title":["Dessiner","un schéma Mermaid"],"content":"Dessine en Mermaid le schéma suivant :\n\n"},
+ {"title":["Expliquer","un morceau de code"],"content":"Explique ce que fait le code suivant, étape par étape :\n\n"}]
+JSON
+)
+SSL_CERT_FILE=/etc/hibou/ca-bundle.crt
+REQUESTS_CA_BUNDLE=/etc/hibou/ca-bundle.crt
+$img
+EOF
+  umask 022
+}
+
+api() {  # méthode chemin [json]
+  curl -fsS -u "$ADMIN:$MDP" -X "$1" -H 'Content-Type: application/json' \
+    "http://127.0.0.1:3000/api/v1$2" ${3:+-d "$3"}
+}
+app_oauth() {  # nom redirection... → "id secret" ; remplace une application du même nom
+  local id uris; uris=$(printf '%s\n' "${@:2}" | jq -R . | jq -sc .)
+  for id in $(api GET /user/applications/oauth2 | jq -r --arg n "$1" '.[] | select(.name==$n) | .id'); do
+    api DELETE "/user/applications/oauth2/$id" >/dev/null
+  done
+  api POST /user/applications/oauth2 "{\"name\":\"$1\",\"redirect_uris\":$uris,\"confidential_client\":true}" \
+    | jq -r '"\(.client_id) \(.client_secret)"'
+}
+
+amorcer() {  # dépôt dossier : premier commit, avant la protection de main
+  local tmp; tmp=$(mktemp -d)
+  local auth; auth="Authorization: Basic $(printf '%s:%s' "$ADMIN" "$MDP" | base64 -w0)"
+  git -c http.extraHeader="$auth" clone -q "http://127.0.0.1:3000/hibou/$1.git" "$tmp/d"
+  cp -a "$2/." "$tmp/d/"
+  sed -i "s/hibou\.lan/$DOMAINE/g" "$tmp/d/mkdocs.yml" 2>/dev/null || true
+  (cd "$tmp/d" && git add -A && git -c user.name=Hibou -c user.email="hibou@$DOMAINE" commit -qm "Amorce Hibou" && git -c http.extraHeader="$auth" push -q origin main)
+  rm -rf "$tmp"
+  note "$1 amorcé."
+}
+
+equipe_id() { api GET "/orgs/hibou/teams/search?q=$1" | jq -r --arg n "$1" '.data[] | select(.name==$n) | .id'; }
+
+configurer() {
+  { set +x; } 2>/dev/null   # jamais de trace ici : les secrets apparaîtraient en clair
+  exiger_root
+  local b="${1:-$ICI_HIBOU}"
+  secrets "$b"
+  [[ -f /srv/forgejo/compose.yaml ]] || erreur "Forgejo n’est pas installé ici." "Lance « hibou installer forge » d’abord."
+  local i; for i in $(seq 1 60); do curl -fsS http://127.0.0.1:3000/api/healthz >/dev/null 2>&1 && break; sleep 2; done
+  curl -fsS http://127.0.0.1:3000/api/healthz >/dev/null || erreur "Forgejo ne répond pas." "Vérifie avec : docker compose -f /srv/forgejo/compose.yaml ps"
+  ADMIN="$HIBOU_ADMIN_NOM"; MDP="$HIBOU_ADMIN_MDP"
+
+  etape "Compte administrateur Forgejo"
+  if ! api GET /user >/dev/null 2>&1; then
+    docker exec -u git hibou-forge-forgejo-1 forgejo --config /data/gitea/conf/app.ini admin user create --admin \
+      --username "$ADMIN" --email "$HIBOU_ADMIN_MAIL" --password "$MDP" --must-change-password=false >/dev/null
+    api GET /user >/dev/null || erreur "Le compte $ADMIN ne répond pas." "Si la double authentification est déjà active, désactive-la le temps de relancer « hibou configurer »."
+  fi
+  fait "$ADMIN prêt. Active sa double authentification après l’installation."
+
+  etape "Organisation et équipes"
+  api GET /orgs/hibou >/dev/null 2>&1 || api POST /orgs '{"username":"hibou","full_name":"Hibou","visibility":"private"}' >/dev/null
+  local equipe unites='["repo.code","repo.issues","repo.pulls","repo.releases","repo.wiki","repo.actions"]'
+  for equipe in dev doc; do
+    [[ -n "$(equipe_id "$equipe")" ]] \
+      || api POST /orgs/hibou/teams "{\"name\":\"$equipe\",\"permission\":\"write\",\"units\":$unites,\"includes_all_repositories\":true}" >/dev/null
+    api PUT "/teams/$(equipe_id "$equipe")/members/$ADMIN" >/dev/null
+  done
+  fait "Organisation hibou, équipes dev et doc."
+
+  etape "Utilisateurs"
+  local u nom mail mdp eq k
+  for u in "${HIBOU_UTILISATEURS[@]}"; do
+    IFS='|' read -r nom mail mdp eq k <<< "$u"
+    api GET "/users/$nom" >/dev/null 2>&1 \
+      || api POST /admin/users "$(jq -nc --arg n "$nom" --arg m "$mail" --arg p "$mdp" '{username:$n,email:$m,password:$p,must_change_password:true,visibility:"private"}')" >/dev/null
+    for equipe in ${eq//,/ }; do api PUT "/teams/$(equipe_id "$equipe")/members/$nom" >/dev/null; done
+    note "$nom ($eq)"
+  done
+  fait "${#HIBOU_UTILISATEURS[@]} utilisateurs ; mot de passe à changer à la première connexion."
+
+  etape "Dépôts protégés"
+  local depot
+  for depot in hibou-infra hibou-docs hibou-eval; do
+    if ! api GET "/repos/hibou/$depot" >/dev/null 2>&1; then
+      api POST /orgs/hibou/repos "{\"name\":\"$depot\",\"auto_init\":true,\"default_branch\":\"main\",\"private\":true}" >/dev/null
+      [[ -d "$b/amorces/$depot" ]] && amorcer "$depot" "$b/amorces/$depot"
+    fi
+    api GET "/repos/hibou/$depot/branch_protections/main" >/dev/null 2>&1 \
+      || api POST "/repos/hibou/$depot/branch_protections" '{"rule_name":"main","enable_push":false,"required_approvals":1,"block_on_rejected_reviews":true,"dismiss_stale_approvals":true}' >/dev/null
+  done
+  fait "main protégée : fusion par pull request approuvée uniquement."
+
+  etape "Compte de rédaction hibou-redac"
+  if ! api GET /users/hibou-redac >/dev/null 2>&1; then
+    api POST /admin/users "{\"username\":\"hibou-redac\",\"email\":\"hibou-redac@$DOMAINE\",\"password\":\"$(cle)\",\"must_change_password\":false,\"visibility\":\"private\"}" >/dev/null
+  fi
+  api PUT /repos/hibou/hibou-docs/collaborators/hibou-redac '{"permission":"write"}' >/dev/null
+  local jeton_redac
+  jeton_redac=$(curl -fsS -u "$ADMIN:$MDP" -H "Sudo: hibou-redac" -H 'Content-Type: application/json' -X POST \
+    "http://127.0.0.1:3000/api/v1/users/hibou-redac/tokens" \
+    -d "{\"name\":\"open-webui-$(date +%Y%m%d%H%M%S)\",\"scopes\":[\"write:repository\"]}" | jq -r .sha1)
+  fait "hibou-redac n’écrit que dans hibou-docs, par branches."
+
+  etape "Runner Forgejo Actions"
+  if [[ ! -f /srv/forgejo/runner/.runner ]]; then
+    local jeton_runner
+    jeton_runner=$(docker exec -u git hibou-forge-forgejo-1 forgejo actions generate-runner-token)
+    cat > /srv/forgejo/runner/config.yml <<EOF
+log: { level: info }
+runner: { file: /data/.runner, capacity: 1 }
+container:
+  network: hibou-forge_default
+  force_pull: false
+  options: -v /srv/docs-site:/publication
+  valid_volumes: ["/srv/docs-site"]
+EOF
+    (cd /srv/forgejo && docker compose --profile runner run --rm -T runner \
+      forgejo-runner register --no-interactive --config /data/config.yml --instance http://forgejo:3000 \
+      --token "$jeton_runner" --name forge --labels "hibou-docs:docker://hibou/docs-builder:actuel" >/dev/null)
+  fi
+  fait "Runner enregistré avec l’étiquette hibou-docs."
+
+  etape "Compte de l’agent hibou-dev"
+  if ! api GET /users/hibou-dev >/dev/null 2>&1; then
+    api POST /admin/users "{\"username\":\"hibou-dev\",\"email\":\"hibou-dev@$DOMAINE\",\"password\":\"$(cle)\",\"must_change_password\":false,\"visibility\":\"private\"}" >/dev/null
+  fi
+  api PUT "/teams/$(equipe_id dev)/members/hibou-dev" >/dev/null
+  # L’équipe dev peut créer des dépôts dans l’organisation : l’agent y ouvre ses nouveaux projets.
+  api PATCH "/teams/$(equipe_id dev)" '{"name":"dev","can_create_org_repo":true}' >/dev/null
+  local jeton_dev
+  jeton_dev=$(curl -fsS -u "$ADMIN:$MDP" -H "Sudo: hibou-dev" -H 'Content-Type: application/json' -X POST \
+    "http://127.0.0.1:3000/api/v1/users/hibou-dev/tokens" \
+    -d "{\"name\":\"opencode-$(date +%Y%m%d%H%M%S)\",\"scopes\":[\"write:repository\",\"write:organization\",\"write:issue\",\"read:package\"]}" | jq -r .sha1)
+  umask 077
+  printf 'FORGEJO_URL=https://forge.%s\nFORGEJO_ORG=hibou\nFORGEJO_TOKEN=%s\n' "$DOMAINE" "$jeton_dev" > /srv/hibou/opencode.env
+  # pip et npm de l’agent lisent les paquets du miroir dans Forgejo.
+  printf 'PIP_INDEX_URL=https://hibou-dev:%s@forge.%s/api/packages/hibou/pypi/simple\nPIP_CERT=/etc/hibou/ca-bundle.crt\n' "$jeton_dev" "$DOMAINE" >> /srv/hibou/opencode.env
+  printf 'registry=https://forge.%s/api/packages/hibou/npm/\n//forge.%s/api/packages/hibou/npm/:_authToken=%s\ncafile=/etc/hibou/ca-bundle.crt\n' \
+    "$DOMAINE" "$DOMAINE" "$jeton_dev" > /srv/hibou/npmrc
+  chown 1000:1000 /srv/hibou/npmrc
+  umask 022
+  consignes_agent
+  install -d -m 700 -o 1000 -g 1000 /srv/hibou/ssh
+  base64 -d <<< "$HIBOU_SSH_AGENT_B64" > /srv/hibou/ssh/id_ed25519
+  ssh-keygen -y -f /srv/hibou/ssh/id_ed25519 > /srv/hibou/ssh/id_ed25519.pub
+  local pub; pub=$(cat /srv/hibou/ssh/id_ed25519.pub)
+  api GET /users/hibou-dev/keys | jq -e --arg k "${pub% *}" '.[] | select(.key | startswith($k))' >/dev/null \
+    || api POST /admin/users/hibou-dev/keys "{\"title\":\"opencode\",\"key\":\"$pub\",\"read_only\":false}" >/dev/null
+  printf 'Host forge.%s\n  Port 2222\n  User git\n  IdentityFile ~/.ssh/id_ed25519\n' "$DOMAINE" > /srv/hibou/ssh/config
+  ssh-keyscan -p 2222 127.0.0.1 2>/dev/null | sed "s/^\[127.0.0.1\]:2222/[forge.$DOMAINE]:2222/" > /srv/hibou/ssh/known_hosts
+  chown -R 1000:1000 /srv/hibou/ssh && chmod 600 /srv/hibou/ssh/*
+  fait "hibou-dev créé, membre de dev, clé SSH déposée pour OpenCode."
+
+  etape "Relecture des pull requests par le LLM dev"
+  if ! api GET /users/hibou-relecteur >/dev/null 2>&1; then
+    api POST /admin/users "{\"username\":\"hibou-relecteur\",\"email\":\"hibou-relecteur@$DOMAINE\",\"password\":\"$(cle)\",\"must_change_password\":false,\"visibility\":\"private\"}" >/dev/null
+  fi
+  [[ -n "$(equipe_id relecture)" ]] \
+    || api POST /orgs/hibou/teams "{\"name\":\"relecture\",\"permission\":\"read\",\"units\":[\"repo.code\",\"repo.pulls\"],\"includes_all_repositories\":true}" >/dev/null
+  api PUT "/teams/$(equipe_id relecture)/members/hibou-relecteur" >/dev/null
+  local jeton_rel secret_rel h
+  jeton_rel=$(curl -fsS -u "$ADMIN:$MDP" -H "Sudo: hibou-relecteur" -H 'Content-Type: application/json' -X POST \
+    "http://127.0.0.1:3000/api/v1/users/hibou-relecteur/tokens" \
+    -d "{\"name\":\"relecteur-$(date +%Y%m%d%H%M%S)\",\"scopes\":[\"write:repository\"]}" | jq -r .sha1)
+  secret_rel=$(cle)
+  for h in $(api GET /orgs/hibou/hooks | jq -r '.[] | select(.config.url=="http://relecteur:8090/") | .id'); do api DELETE "/orgs/hibou/hooks/$h" >/dev/null; done
+  api POST /orgs/hibou/hooks "$(jq -nc --arg s "$secret_rel" '{type:"forgejo",active:true,events:["pull_request"],config:{url:"http://relecteur:8090/",content_type:"json",secret:$s}}')" >/dev/null
+  profil dev "$HIBOU_PROFIL_DEV"
+  umask 077
+  cat > /srv/hibou/relecteur.env <<EOF
+FORGEJO=http://forgejo:3000
+JETON=$jeton_rel
+SECRET=$secret_rel
+LLM_URL=http://$HIBOU_IP_DEV:8080/v1
+LLM_CLE=${HIBOU_CLE_RELECTEUR:-$HIBOU_CLE_WEBUI}
+MODELE=$PRINCIPAL
+EOF
+  umask 022
+  fait "Chaque pull request de l’organisation hibou reçoit un avis de hibou-relecteur ($PRINCIPAL), au dernier rang de la file."
+
+  etape "Applications de connexion"
+  local owui code pve graf
+  owui=$(app_oauth "Open WebUI" "https://chat.$DOMAINE/oauth/oidc/callback")
+  code=$(app_oauth "OpenCode" "https://code.$DOMAINE/oauth2/callback")
+  # Une adresse de retour par hôte Proxmox : on se connecte à chacun par son propre nom.
+  local hotes=("https://pve-doc.$DOMAINE:8006" "https://pve-dev.$DOMAINE:8006") n=1 ip
+  for ip in $HIBOU_IP_CLUSTER; do hotes+=("https://pve$n.$DOMAINE:8006"); n=$((n + 1)); done
+  pve=$(app_oauth "Proxmox" "${hotes[@]}")
+  graf=$(app_oauth "Grafana" "https://supervision.$DOMAINE/login/generic_oauth")
+  umask 077
+  cat > /srv/hibou/open-webui-oidc.env <<EOF
+ENABLE_OAUTH_SIGNUP=true
+ENABLE_LOGIN_FORM=false
+OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true
+OAUTH_PROVIDER_NAME=Hibou · Forge
+OPENID_PROVIDER_URL=https://forge.$DOMAINE/.well-known/openid-configuration
+OAUTH_CLIENT_ID=${owui% *}
+OAUTH_CLIENT_SECRET=${owui#* }
+OAUTH_SCOPES=openid email profile groups
+ENABLE_OAUTH_ROLE_MANAGEMENT=true
+OAUTH_ROLES_CLAIM=groups
+OAUTH_ALLOWED_ROLES=hibou:doc,hibou:dev,hibou:owners
+OAUTH_ADMIN_ROLES=hibou:owners
+EOF
+  cat > /srv/hibou/code-oidc.env <<EOF
+OAUTH2_PROXY_CLIENT_ID=${code% *}
+OAUTH2_PROXY_CLIENT_SECRET=${code#* }
+OAUTH2_PROXY_COOKIE_SECRET=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32)
+EOF
+  cat > /srv/supervision/grafana.env <<EOF
+GF_SECURITY_ADMIN_USER=$ADMIN
+GF_SECURITY_ADMIN_PASSWORD=$MDP
+GF_AUTH_GENERIC_OAUTH_ENABLED=true
+GF_AUTH_GENERIC_OAUTH_NAME=Hibou · Forge
+GF_AUTH_GENERIC_OAUTH_CLIENT_ID=${graf% *}
+GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET=${graf#* }
+GF_AUTH_GENERIC_OAUTH_SCOPES=openid email profile groups
+GF_AUTH_GENERIC_OAUTH_AUTH_URL=https://forge.$DOMAINE/login/oauth/authorize
+GF_AUTH_GENERIC_OAUTH_TOKEN_URL=https://forge.$DOMAINE/login/oauth/access_token
+GF_AUTH_GENERIC_OAUTH_API_URL=https://forge.$DOMAINE/login/oauth/userinfo
+GF_AUTH_GENERIC_OAUTH_TLS_CLIENT_CA=/etc/hibou/ca.crt
+GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH=contains(groups[*], 'hibou:owners') && 'Admin' || 'Viewer'
+GF_AUTH_GENERIC_OAUTH_ALLOWED_GROUPS=hibou:owners,hibou:dev,hibou:doc
+GF_AUTH_GENERIC_OAUTH_GROUPS_ATTRIBUTE_PATH=groups
+GF_AUTH_GENERIC_OAUTH_USE_PKCE=true
+GF_AUTH_GENERIC_OAUTH_ALLOW_SIGN_UP=true
+GF_AUTH_DISABLE_LOGIN_FORM=true
+EOF
+  printf 'PVE_ID=%s\nPVE_SECRET=%s\n' "${pve% *}" "${pve#* }" > /srv/hibou/pve-oidc.env
+  umask 022
+  docker cp hibou-forge-caddy-1:/data/caddy/pki/authorities/local/root.crt /srv/supervision/hibou-ca.crt
+  cat /etc/ssl/certs/ca-certificates.crt /srv/supervision/hibou-ca.crt > /srv/supervision/ca.crt
+  cat /etc/ssl/certs/ca-certificates.crt /srv/supervision/hibou-ca.crt > /srv/hibou/ca-bundle.crt
+  cp /srv/supervision/hibou-ca.crt /srv/hibou/hibou-ca.crt
+  # Profils actifs à chaque « docker compose up », y compris au redémarrage.
+  echo "COMPOSE_PROFILES=apps,runner" > /srv/forgejo/.env
+  demarrer /srv/forgejo
+  (cd /srv/forgejo && docker compose up -d --force-recreate grafana uptime-kuma >/dev/null 2>&1) || true
+  fait "Connexion unique par Forgejo : Open WebUI, OpenCode, Grafana."
+
+  etape "Open WebUI : outil, modèles et templates"
+  amorcer_open_webui "$b" "$jeton_redac" || note "Open WebUI n’a pas tout accepté : importe à la main $b/amorces/open-webui/ (outil et modèles)."
+
+  etape "Accès"
+  local acces=/root/hibou-acces.txt
+  umask 077
+  {
+    echo "Hibou $VERSION_HIBOU — accès ($(date +%F)). Fichier à garder hors ligne."
+    echo; echo "Certificat racine à installer sur les postes : /srv/hibou/hibou-ca.crt"
+    echo; echo "Clés d’API (en-tête Authorization: Bearer <clé>) :"
+    echo "  https://llm-doc.$DOMAINE/v1   https://llm-dev.$DOMAINE/v1"
+    for u in "${HIBOU_UTILISATEURS[@]}"; do IFS='|' read -r nom mail mdp eq k <<< "$u"; printf '  %-20s %s\n' "$nom" "$k"; done
+    echo; echo "Paquets hors ligne (jeton Forgejo personnel avec read:package) :"
+    echo "  pip  : pip config set global.index-url https://<compte>:<jeton>@forge.$DOMAINE/api/packages/hibou/pypi/simple"
+    echo "  npm  : npm config set registry https://forge.$DOMAINE/api/packages/hibou/npm/"
+    echo "         npm config set //forge.$DOMAINE/api/packages/hibou/npm/:_authToken <jeton>"
+    echo "  docker login forge.$DOMAINE ; docker pull forge.$DOMAINE/hibou/<image>:<tag>"
+    echo; echo "Proxmox : « hibou installer » déclare Forgejo sur chaque hôte. À la main :"
+    echo "  pveum realm add forgejo --type openid --issuer-url https://forge.$DOMAINE/ --client-id ${pve% *} --client-key ${pve#* } --username-claim username --autocreate 1"
+  } > "$acces"
+  umask 022
+  fait "Clés d’API et commande Proxmox dans $acces (lisible par root seulement)."
+  note "Uptime Kuma : crée son administrateur sur https://etat.$DOMAINE au premier accès."
+  printf '\n'; dire "Forge configurée. Installe maintenant doc et dev depuis leur R730."
+}
+
+# Premier administrateur d’Open WebUI créé par l’API, puis outil, modèles et base de templates.
+amorcer_open_webui() {  # bundle jeton_redac
+  local u=http://127.0.0.1:8081/api/v1 jeton i
+  for i in $(seq 1 90); do curl -fsS http://127.0.0.1:8081/health >/dev/null 2>&1 && break; sleep 2; done
+  local ident; ident=$(jq -nc --arg n "$ADMIN" --arg e "$HIBOU_ADMIN_MAIL" --arg p "$MDP" '{name:$n,email:$e,password:$p}')
+  jeton=$(curl -fsS "$u/auths/signup" -H 'Content-Type: application/json' -d "$ident" 2>/dev/null | jq -r .token) \
+    || jeton=$(curl -fsS "$u/auths/signin" -H 'Content-Type: application/json' -d "$ident" | jq -r .token) || return 1
+  local h=(-H "Authorization: Bearer $jeton" -H 'Content-Type: application/json')
+  if [[ -n "$2" ]]; then   # mise à jour : outil et jeton déjà en place
+  jq -n --rawfile c "$1/amorces/open-webui/publier_forgejo.py" \
+    '{id:"publier_forgejo",name:"Publier dans Forgejo",content:$c,meta:{description:"Dépose un document dans hibou-docs et ouvre une pull request."}}' \
+    | curl -fsS "${h[@]}" "$u/tools/create" -d @- >/dev/null 2>&1 || true
+  jq -nc --arg f "https://forge.$DOMAINE" --arg j "$2" '{forgejo_url:$f,depot:"hibou/hibou-docs",jeton:$j}' \
+    | curl -fsS "${h[@]}" "$u/tools/id/publier_forgejo/valves/update" -d @- >/dev/null || return 1
+  fi
+  # Base de connaissances avec les templates de hibou-docs.
+  local kb f fid
+  kb=$(curl -fsS "${h[@]}" "$u/knowledge/" | jq -c '(.items? // .)[] | select(.name=="Hibou · Templates")' | head -1)
+  if [[ -z "$kb" ]]; then
+    kb=$(curl -fsS "${h[@]}" "$u/knowledge/create" -d '{"name":"Hibou · Templates","description":"Templates de hibou-docs"}')
+    for f in "$1"/amorces/hibou-docs/templates/*.md; do
+      fid=$(curl -fsS -H "Authorization: Bearer $jeton" -F "file=@$f" "$u/files/" | jq -r .id)
+      curl -fsS "${h[@]}" "$u/knowledge/$(jq -r .id <<< "$kb")/file/add" -d "{\"file_id\":\"$fid\"}" >/dev/null
+    done
+  fi
+  profil doc "$HIBOU_PROFIL_DOC"
+  # Base « Hibou · Documentation » : alimentée par le runner à chaque fusion dans hibou-docs.
+  local kbdoc cle_owui
+  kbdoc=$(curl -fsS "${h[@]}" "$u/knowledge/" | jq -c '(.items? // .)[] | select(.name=="Hibou · Documentation")' | head -1)
+  [[ -n "$kbdoc" ]] || kbdoc=$(curl -fsS "${h[@]}" "$u/knowledge/create" -d '{"name":"Hibou · Documentation","description":"Documentation validée de hibou-docs"}')
+  cle_owui=$(curl -fsS "${h[@]}" -X POST "$u/auths/api_key" | jq -r '.api_key // empty')
+  if [[ -n "$cle_owui" ]]; then
+    api PUT /repos/hibou/hibou-docs/actions/secrets/OWUI_CLE "$(jq -nc --arg d "$cle_owui" '{data:$d}')" >/dev/null \
+      && docker run --rm --network hibou-forge_default -v "$1/amorces/hibou-docs:/d:ro" -w /d \
+        -e OWUI_URL=http://open-webui:8080 -e OWUI_CLE="$cle_owui" hibou/docs-builder:actuel python3 outils/synchroniser_owui.py docs >/dev/null \
+      && fait "Documentation de départ envoyée au chat ; le runner la tient à jour après chaque fusion." \
+      || note "Clé du runner ou première synchronisation refusée : la base se remplira à la prochaine fusion dans hibou-docs."
+  else
+    note "Open WebUI n’a pas délivré de clé d’API : la synchronisation de la documentation est à brancher à la main (secret OWUI_CLE de hibou-docs)."
+  fi
+  # Modèle de questions-réponses sur la documentation interne.
+  jq -nc --argjson kb "$kbdoc" --arg b "$PRINCIPAL" '{id:"hibou-documentation",name:"Hibou · Documentation interne",base_model_id:$b,
+    meta:{description:"Répond à partir de la documentation validée de hibou-docs, avec ses sources.",profile_image_url:"/static/hibou/symbole-sur-nuit.svg",
+      knowledge:[$kb + {type:"collection"}],capabilities:{citations:true}},
+    params:{system:"Tu es Hibou. Tu réponds en français, au tutoiement, calme et précis, sans point d’exclamation ni émoji. Tu réponds uniquement à partir des documents fournis et tu cites la page utilisée. Si la documentation ne contient pas la réponse, dis-le et propose de rédiger la page manquante avec un modèle Hibou de rédaction.",temperature:0.2},
+    is_active:true}' | { curl -fsS "${h[@]}" "$u/models/create" -d @- >/dev/null 2>&1 || true; }
+
+  # Modèles Hibou rattachés au modèle principal réellement installé sur doc.
+  local base; profil doc "$HIBOU_PROFIL_DOC"; base="$PRINCIPAL"
+  jq -c --arg b "$base" --argjson kb "$kb" '.[] | .base_model_id = $b | .meta.knowledge = [$kb + {type: "collection"}]' \
+    "$1/amorces/open-webui/modeles-hibou.json" | while read -r m; do
+      curl -fsS "${h[@]}" "$u/models/create" -d "$m" >/dev/null 2>&1 \
+        || curl -fsS "${h[@]}" "$u/models/model/update?id=$(jq -r .id <<< "$m")" -d "$m" >/dev/null
+    done
+  # Modèles techniques masqués du sélecteur : embeddings et autocomplétion ne servent pas au chat.
+  for m in qwen3-embedding fim; do
+    jq -nc --arg i "$m" '{id:$i,name:$i,base_model_id:null,meta:{},params:{},is_active:false}' \
+      | { curl -fsS "${h[@]}" "$u/models/create" -d @- >/dev/null 2>&1 || true; }
+  done
+  fait "Outil publier_forgejo, 5 modèles Hibou (base $base), base de templates, suggestions et modèle par défaut en place."
 }
 
 installer() {
-  local role="${1:-}" b="${2:-$(dirname "$(readlink -f "$0")")}"
-  [[ -n "${ROLE_IMAGES[$role]:-}" || "$role" == "pve" ]] || erreur "Rôle inconnu : ${role:-aucun}." "Choisis dev, doc, forge ou pve."
+  local role="${1:-}" b="${2:-$ICI_HIBOU}"
+  [[ "$role" =~ ^(forge|doc|dev|noeud)$ ]] || erreur "Rôle inconnu : ${role:-aucun}." "Choisis forge, doc, dev ou noeud."
   exiger_root
-  [[ -f "$b/MANIFEST.md" ]] || erreur "Je ne trouve pas le bundle dans $b." "Indique son dossier : hibou installer $role /chemin/du/bundle"
-  verifier "$b"
-  "installer_$role" "$b"
-  printf '\n'; dire "J’ai terminé le rôle $role."
+  b="$(cd "$b" && pwd)"
+  [[ -f "$b/MANIFEST.md" && -f "$b/config.env" ]] || erreur "Je ne trouve pas le bundle dans $b." "Indique son dossier : hibou installer $role /chemin/du/bundle"
+  # shellcheck disable=SC1091
+  source "$b/config.env"; DOMAINE="$HIBOU_DOMAINE"
+  if [[ -f /etc/pve/.version ]]; then
+    sur_proxmox "$role" "$b"
+  else
+    [[ "$role" != noeud ]] || erreur "Le rôle noeud s’installe sur un hôte Proxmox."
+    local et=("socle:Socle (paquets, pilote, Docker)" "images:Chargement des images")
+    if [[ $role == forge ]]; then et+=("config:Configuration et démarrage" "comptes:Comptes et connexion unique" "miroir:Import du miroir")
+    else et+=("modeles:Copie des modèles" "config:Configuration et démarrage"); fi
+    proposer_sauts "${et[@]}"
+    secrets "$b"
+    if [[ -n "${HIBOU_SANS_VERIF:-}" ]]; then :; else verifier "$b"; fi
+    if [[ "$role" == forge ]]; then installer_forge "$b"; else installer_gpu "$role" "$b"; fi
+  fi
+  printf '\n'; dire "J’ai terminé le rôle $role${HIBOU_PHASE:+ (phase $HIBOU_PHASE)}."
 }
 
 # ─── Autotest ───────────────────────────────────────────────────────────────
 autotest() {
-  local ligne alias depot motifs role n=0
-  for ligne in "${MODELES[@]}"; do
-    IFS='|' read -r alias depot motifs role <<< "$ligne"
-    [[ -n "$alias" && "$depot" == */* && -n "$motifs" ]] || erreur "Ligne de modèle mal formée : $ligne"
-    [[ "$role" == dev || "$role" == doc ]] || erreur "Rôle de modèle inconnu : $role"
-    n=$((n + 1))
+  local role i n=0 ligne alias depot motifs ctx args
+  for role in dev doc; do
+    local -n libs="PROFILS_${role^^}" seuils="PROFILS_${role^^}_GO"
+    (( ${#libs[@]} == ${#seuils[@]} )) || erreur "PROFILS_${role^^} et ses seuils n’ont pas la même longueur."
+    for i in $(seq 1 ${#libs[@]}); do
+      profil "$role" "$i"
+      for ligne in "${MODELES_ROLE[@]}"; do
+        IFS='|' read -r alias depot motifs ctx args <<< "$ligne"
+        [[ -n "$alias" && "$depot" == */* && -n "$motifs" && "$ctx" =~ ^[0-9]+$ ]] || erreur "Modèle mal formé ($role $i) : $ligne"
+        n=$((n + 1))
+      done
+    done
+    unset -n libs seuils
   done
   for role in "${!ROLE_IMAGES[@]}"; do
     for alias in ${ROLE_IMAGES[$role]}; do
-      [[ "$alias" == opencode || -n "${IMAGES[$alias]:-}" ]] || erreur "Image $alias du rôle $role absente de IMAGES."
+      [[ " $LOCALES " == *" $alias "* || -n "${IMAGES[$alias]:-}" ]] || erreur "Image $alias du rôle $role absente de IMAGES."
     done
   done
-  fait "Configuration cohérente : $n modèles, ${#IMAGES[@]} images, 4 rôles."
+  [[ "$(modele_image 4 | cut -d'|' -f4)" == --lowvram && -z "$(modele_image 12 | cut -d'|' -f4)" ]] || erreur "modele_image incohérent."
+  if python3 -c 'import asyncio' 2>/dev/null; then source_priorite | HIBOU_AUTOTEST=1 python3 - || erreur "Autotest de la file de priorité en échec."; fi
+  fait "Configuration cohérente : $n lignes de modèles, ${#IMAGES[@]} images, 3 rôles."
 }
 
 aide() {
   cat <<EOF
   ${GRAS}${BRUME}Utilisation${FIN}
-    hibou telecharger [dossier]          Sur la VM connectée : prépare le bundle.
+    hibou telecharger [dossier]          Machine connectée : questions, puis préparation du bundle.
     hibou verifier [dossier]             Contrôle les empreintes SHA-256.
-    hibou installer <rôle> [dossier]     Installe un rôle depuis le bundle.
+    hibou installer <rôle> [dossier]     Sur l’hôte Proxmox : crée la VM et installe tout, sans question.
+    hibou mettre-a-jour <rôle> [dossier] Sur l’hôte Proxmox : n’apporte que ce qui a changé (images, modèles, cartes, réglages).
+    hibou configurer [dossier]           Sur forge : rejoue comptes, dépôts et connexion unique.
+    hibou evaluer <doc|dev|tout> [dossier]  Sur forge : note les modèles (code, rédaction, vision) et met à jour Grafana.
+    hibou miroir [dossier]               Sur forge : republie le miroir pip, npm, git, images dans Forgejo.
     hibou autotest                       Vérifie la cohérence des réglages.
 
   ${GRAS}${BRUME}Rôles${FIN}
-    pve     Hôte Proxmox du 7910 : pilote NVIDIA, configuration LXC.
-    forge   VM forge : Forgejo, registre, Caddy.
-    doc     Conteneur LXC doc : llama-swap, Open WebUI, Caddy.
-    dev     Precision 5820 : llama-swap, OpenCode, Caddy.
+    forge   Sur un nœud du cluster : VM des applications (Forgejo, Open WebUI, OpenCode, supervision).
+    doc     Sur le R730 doc : VM avec les cartes en passthrough, LLM de rédaction, vision, images.
+    dev     Sur le R730 dev : VM avec les cartes en passthrough, LLM de code.
+    noeud   Sur les autres nœuds du cluster : supervision de l’hôte seulement.
 
-  ${PIERRE}Ordre conseillé : pve, forge, doc, dev. Domaine : $DOMAINE (variable HIBOU_DOMAINE).${FIN}
+  ${GRAS}${BRUME}Options${FIN}
+    HIBOU_SAUTER=vm,copie     installer : étapes à sauter, sans question
+    HIBOU_STOCKAGE=<nom>      installer : stockage Proxmox des disques
+    HIBOU_RAM_GPU=48          installer doc/dev : mémoire de la VM en Go (défaut : tout l’hôte − 16 Go)
+    HIBOU_CPU_GPU=12          installer doc/dev : fils de la VM (défaut : tous − 4)
+    HIBOU_PARTIES=apt,extra   telecharger : ne refait que certaines parties
+    HIBOU_SUPPORT_GO=512      telecharger : taille du disque de transport
+
+  ${PIERRE}Ordre : forge, puis doc et dev. Phrase de passe demandée une fois par installation.${FIN}
 EOF
 }
 
@@ -523,6 +2920,10 @@ case "${1:-aide}" in
   telecharger) shift; telecharger "$@" ;;
   verifier)    shift; verifier "$@" ;;
   installer)   shift; installer "$@" ;;
+  mettre-a-jour) shift; HIBOU_MAJ=1; installer "$@" ;;
+  configurer)  shift; configurer "$@" ;;
+  evaluer)     shift; b="$(cd "${2:-$ICI_HIBOU}" && pwd)"; source "$b/config.env"; DOMAINE="$HIBOU_DOMAINE"; evaluer "${1:-tout}" "$b" ;;
+  miroir)      shift; b="$(cd "${1:-$ICI_HIBOU}" && pwd)"; source "$b/config.env"; DOMAINE="$HIBOU_DOMAINE"; importer_miroir "$b" ;;
   autotest)    autotest ;;
   aide|-h|--help) aide ;;
   *) erreur "Commande inconnue : $1." "Lance « hibou aide » pour voir les commandes." ;;

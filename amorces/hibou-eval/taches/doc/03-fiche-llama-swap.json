@@ -1,0 +1,5 @@
+{
+  "modele": "fiche-technique",
+  "sujet": "llama-swap sur le Precision 5820",
+  "notes": "llama-swap sert une API compatible OpenAI sur le port interne 8080, charge les modèles à la demande. Carte RTX 6000 Ada 48 Go. Modèles : Qwen3.8-27B Q8, Qwen3-Coder-Next Q4, Qwen2.5-Coder 7B pour l’autocomplétion. Exposé par Caddy sur llm-dev.hibou.lan avec une clé d’API."
+}

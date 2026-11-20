@@ -1,0 +1,1 @@
+Écris `dans_reseau(ip: str, reseau: str) -> bool` qui dit si une adresse IPv4 appartient à un réseau CIDR, sans utiliser le module `ipaddress`. Lève `ValueError` pour une adresse ou un réseau mal formé.

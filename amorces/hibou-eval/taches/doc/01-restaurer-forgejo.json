@@ -1,0 +1,5 @@
+{
+  "modele": "procedure",
+  "sujet": "Restaurer Forgejo depuis une sauvegarde",
+  "notes": "Forgejo tourne en conteneur sur la VM forge, dossier /srv/forgejo, compose « hibou-forge ». Sauvegardes : /srv/forgejo/data/sauvegardes/forgejo-AAAAMMJJ-HHMM.zip, produites par forgejo dump. Base SQLite. Arrêt : docker compose stop forgejo."
+}

@@ -1,0 +1,6 @@
+config:
+  default: true
+  MD013: false          # pas de limite de longueur de ligne
+  MD033: false          # commentaires de consigne et balises simples autorisés
+  MD041: false          # l’en-tête YAML précède le titre
+globs: ["docs/**/*.md"]

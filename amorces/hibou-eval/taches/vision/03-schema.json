@@ -1,0 +1,11 @@
+{
+  "question": "Reproduis ce schéma en Mermaid, avec les libellés des liens.",
+  "attendus": [
+    "mermaid",
+    "OpenCode",
+    "llama-swap",
+    "Forgejo",
+    "Git SSH",
+    "API"
+  ]
+}

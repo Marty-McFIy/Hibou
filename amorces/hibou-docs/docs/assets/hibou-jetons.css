@@ -1,0 +1,71 @@
+/* Jetons Hibou, générés depuis tokens.json. data-theme="nuit" (défaut) ou "brume" sur <html>. */
+@font-face { font-family: "Fraunces"; src: url("./fonts/Fraunces-600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Inter"; src: url("./fonts/Inter-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("./fonts/JetBrainsMono-500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+
+:root, [data-theme="nuit"] {
+  --nuit: #0F1420;
+  --ardoise: #2F3B52;
+  --ambre: #F2B544;
+  --brume: #E9E4D8;
+  --pierre: #8A93A6;
+  --fond: #0F1420;
+  --fond-creux: #0A0E17;
+  --surface: #171E2D;
+  --surface-haute: #1F2839;
+  --filet: #2F3B52;
+  --filet-fort: #6A7893;
+  --texte: #E9E4D8;
+  --texte-doux: #8A93A6;
+  --accent: #F2B544;
+  --sur-accent: #0F1420;
+  --accent-fonce: #B9821F;
+  --accent-texte: #F2B544;
+  --accent-doux: #2B2618;
+  --succes: #5CC8B8;
+  --succes-doux: #12312E;
+  --danger: #F0876B;
+  --danger-doux: #3A1E18;
+  --logo-bec: #2F3B52;
+  --anneau: #F2B544;
+  --relief-1: inset 0 1px 0 rgba(233,228,216,0.07), 0 1px 2px rgba(0,0,0,0.5);
+  --relief-2: inset 0 1px 0 rgba(233,228,216,0.08), 0 2px 4px rgba(0,0,0,0.45), 0 8px 20px rgba(0,0,0,0.4);
+  --relief-3: inset 0 1px 0 rgba(233,228,216,0.1), 0 4px 8px rgba(0,0,0,0.45), 0 24px 48px rgba(0,0,0,0.55);
+  --creux: inset 0 2px 4px rgba(0,0,0,0.6), inset 0 -1px 0 rgba(233,228,216,0.05);
+  --relief-accent: inset 0 1px 0 rgba(255,255,255,0.45), 0 2px 0 #b9821f, 0 6px 14px rgba(0,0,0,0.4);
+  --lueur: 0 0 0 1px rgba(242,181,68,0.4), 0 0 24px rgba(242,181,68,0.3);
+  --anneau-focus: 0 0 0 2px #0f1420, 0 0 0 4px #f2b544;
+}
+[data-theme="brume"] {
+  --nuit: #0F1420;
+  --ardoise: #2F3B52;
+  --ambre: #F2B544;
+  --brume: #E9E4D8;
+  --pierre: #8A93A6;
+  --fond: #E9E4D8;
+  --fond-creux: #DCD6C7;
+  --surface: #F2EEE4;
+  --surface-haute: #FBF8F1;
+  --filet: #C9C3B4;
+  --filet-fort: #787262;
+  --texte: #0F1420;
+  --texte-doux: #4A5468;
+  --accent: #F2B544;
+  --sur-accent: #0F1420;
+  --accent-fonce: #8A5F0A;
+  --accent-texte: #7A4F00;
+  --accent-doux: #F1E0B4;
+  --succes: #0B5F54;
+  --succes-doux: #CFE6DC;
+  --danger: #9E2D17;
+  --danger-doux: #F3D5C9;
+  --logo-bec: #F2B544;
+  --anneau: #0F1420;
+  --relief-1: inset 0 1px 0 rgba(255,255,255,0.8), 0 1px 2px rgba(15,20,32,0.18);
+  --relief-2: inset 0 1px 0 rgba(255,255,255,0.9), 0 2px 4px rgba(15,20,32,0.12), 0 8px 20px rgba(15,20,32,0.14);
+  --relief-3: inset 0 1px 0 rgba(255,255,255,0.95), 0 4px 8px rgba(15,20,32,0.12), 0 24px 48px rgba(15,20,32,0.2);
+  --creux: inset 0 2px 4px rgba(15,20,32,0.16), inset 0 -1px 0 rgba(255,255,255,0.7);
+  --relief-accent: inset 0 1px 0 rgba(255,255,255,0.55), 0 2px 0 #8a5f0a, 0 6px 14px rgba(15,20,32,0.2);
+  --lueur: 0 0 0 1px rgba(138,95,10,0.5), 0 0 20px rgba(242,181,68,0.55);
+  --anneau-focus: 0 0 0 2px #e9e4d8, 0 0 0 4px #0f1420;
+}

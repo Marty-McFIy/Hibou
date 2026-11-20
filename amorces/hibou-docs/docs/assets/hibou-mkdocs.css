@@ -1,0 +1,27 @@
+/* Material for MkDocs aux couleurs de Hibou : slate = Nuit, default = Brume. */
+[data-md-color-scheme="slate"] { color-scheme: dark; }
+[data-md-color-scheme="slate"], [data-md-color-scheme="default"] {
+  --md-default-bg-color: var(--fond);
+  --md-default-fg-color: var(--texte);
+  --md-default-fg-color--light: var(--texte-doux);
+  --md-default-fg-color--lighter: var(--filet-fort);
+  --md-default-fg-color--lightest: var(--filet);
+  --md-primary-fg-color: var(--fond-creux);
+  --md-primary-bg-color: var(--texte);
+  --md-accent-fg-color: var(--accent-texte);
+  --md-typeset-a-color: var(--accent-texte);
+  --md-code-bg-color: var(--fond-creux);
+  --md-code-fg-color: var(--texte);
+  --md-footer-bg-color: var(--fond-creux);
+  --md-text-font-family: Inter, system-ui, sans-serif;
+  --md-code-font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+/* Les jetons suivent le schéma choisi par le lecteur. */
+[data-md-color-scheme="default"] {
+  --fond: #E9E4D8; --fond-creux: #DCD6C7; --surface: #F2EEE4; --texte: #0F1420; --texte-doux: #4A5468;
+  --filet: #C9C3B4; --filet-fort: #787262; --accent-texte: #7A4F00;
+}
+.md-header, .md-tabs { background: #0A0E17; color: #E9E4D8; }
+.md-typeset h1, .md-typeset h2 { font-family: Fraunces, Georgia, serif; font-weight: 600; }
+.md-typeset pre > code { background: #0A0E17; color: #E9E4D8; }
+.md-typeset img[src$=".svg"] { background: #FBF8F1; border-radius: 8px; padding: 12px; }

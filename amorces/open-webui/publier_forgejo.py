@@ -1,12 +1,41 @@
 """
 title: Publier dans Forgejo
 author: Hibou
-version: 0.1.0
+version: 0.2.0
 description: Dépose un document Markdown dans hibou-docs, sur une branche, et ouvre une pull request.
 """
 import base64, datetime, re
 import requests
 from pydantic import BaseModel, Field
+
+
+URL_NUE = re.compile(r"(?<![<(`\[])\bhttps?://[^\s<>()`]+[^\s<>()`.,;:!?]")
+
+
+def normaliser(md: str) -> str:
+    """Règles du runner (markdownlint) qu'un petit modèle oublie : langage et lignes vides autour des blocs de code,
+    adresses nues entre chevrons, un seul saut de ligne final. Le texte lui-même n'est pas touché."""
+    sortie, dans_bloc, fermeture = [], False, ""
+    lignes = md.replace("\r\n", "\n").split("\n")
+    for i, l in enumerate(lignes):
+        m = re.match(r"^(\s*)(`{3,}|~{3,})(.*)$", l)
+        if m and not dans_bloc:
+            dans_bloc, fermeture = True, m.group(2)
+            if sortie and sortie[-1].strip():
+                sortie.append("")
+            sortie.append(l if m.group(3).strip() else f"{m.group(1)}{m.group(2)}text")
+            continue
+        if m and dans_bloc and m.group(2).startswith(fermeture[0]) and len(m.group(2)) >= len(fermeture) and not m.group(3).strip():
+            dans_bloc = False
+            sortie.append(l)
+            if i + 1 < len(lignes) and lignes[i + 1].strip():
+                sortie.append("")
+            continue
+        if not dans_bloc:
+            # Hors code en ligne : les segments entre accents graves restent tels quels.
+            l = "`".join(p if k % 2 else URL_NUE.sub(lambda u: f"<{u.group(0)}>", p) for k, p in enumerate(l.split("`")))
+        sortie.append(l)
+    return "\n".join(sortie).rstrip("\n") + "\n"
 
 
 class Tools:
@@ -36,6 +65,7 @@ class Tools:
             return "Aucun jeton configuré. Renseigne-le dans les réglages de l’outil."
         if not re.fullmatch(r"docs/[a-z0-9][a-z0-9/_-]*\.md", chemin) or ".." in chemin:
             return "Chemin refusé. Utilise docs/<dossier>/<nom-en-minuscules>.md, sans espace ni accent."
+        contenu = normaliser(contenu)
         if not contenu.startswith("---"):
             return "Le document doit commencer par son en-tête YAML (modele, titre)."
         auteur = (__user__ or {}).get("name", "inconnu")

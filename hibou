@@ -103,7 +103,7 @@ profil() {  # rôle numéro → MODELES_ROLE, GROUPES, PRINCIPAL
         "fim|ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF|*q8_0*|8192|")
       GROUPES="  code: { swap: false, exclusive: true, members: [qwen3.5-9b, fim] }" ;;
     dev:5) MODELES_ROLE=(
-        "qwen3.5-4b|unsloth/Qwen3.5-4B-GGUF|*UD-Q4_K_XL*|16384|--cache-reuse 256 --reasoning-budget 0"   # cf. doc:4 : réflexion sans fin
+        "qwen3.5-4b|unsloth/Qwen3.5-4B-GGUF|*UD-Q4_K_XL*|32768|--cache-reuse 256 --reasoning-budget 0"   # cf. doc:4 ; 32k : OpenCode prend ~8k pour ses consignes et ses outils
         "fim|ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF|*q8_0*|4096|-ngl 0")   # complétion sur le processeur : 4B + 1.5B Q8 dépassent 4 Go
       GROUPES="  code: { swap: false, exclusive: true, members: [qwen3.5-4b, fim] }" ;;
     doc:1) MODELES_ROLE=(
@@ -839,15 +839,52 @@ telecharger() {
   CTX="$(mktemp -d)"
   cat > "$CTX/Dockerfile" <<EOF
 FROM node:22-bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client ca-certificates ripgrep curl jq python3 python3-venv python3-pip && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client ca-certificates ripgrep curl jq python3 python3-venv python3-pip python3-pytest && rm -rf /var/lib/apt/lists/*
 RUN npm install -g opencode-ai@${OPENCODE_VERSION}
 # shortcut: OpenCode installe ses fournisseurs à la volée ; on précharge celui qu’on utilise. Vérifier au premier test hors ligne.
 RUN mkdir -p /home/node/.cache/opencode && cd /home/node/.cache/opencode && npm install @ai-sdk/openai-compatible && chown -R node:node /home/node/.cache
+COPY forgejo-nouveau-depot forgejo-pr /usr/local/bin/
 USER node
 WORKDIR /workspace
 ENTRYPOINT ["opencode"]
 CMD ["serve", "--hostname", "0.0.0.0", "--port", "4096"]
 EOF
+  # Commandes toutes faites pour l’agent : un petit modèle se trompe d’adresse ou casse le JSON d’un curl écrit à la main.
+  cat > "$CTX/forgejo-nouveau-depot" <<'SH'
+#!/bin/sh
+# forgejo-nouveau-depot <projet> : crée <org>/<projet> dans Forgejo (privé, branche main) et le clone dans /workspace/<projet>.
+set -eu
+p="${1:?Usage : forgejo-nouveau-depot <projet>}"
+case "$p" in *[!a-z0-9._-]*) echo "Nom refusé : minuscules, chiffres, . _ - seulement." >&2; exit 1 ;; esac
+d="/workspace/$p"; ancien=""
+# Déjà cloné : rien à faire. Dossier commencé à la main : mis de côté, puis recopié dans le clone.
+if git -C "$d" remote get-url origin >/dev/null 2>&1; then echo "Déjà cloné : $d. Continue dans ce dossier."; exit 0; fi
+if [ -e "$d" ]; then ancien="$d.avant-depot"; rm -rf "$ancien"; mv "$d" "$ancien"; fi
+jq -n --arg n "$p" '{name:$n, private:true, auto_init:true, default_branch:"main"}' \
+  | curl -fsS -o /dev/null -H "Authorization: token $FORGEJO_TOKEN" -H 'Content-Type: application/json' -d @- \
+    "$FORGEJO_URL/api/v1/orgs/$FORGEJO_ORG/repos" 2>/dev/null \
+  || echo "Le dépôt existe déjà dans Forgejo : je le clone."
+git clone -q "git@${FORGEJO_URL#https://}:$FORGEJO_ORG/$p.git" "$d"
+if [ -n "$ancien" ]; then
+  (cd "$ancien" && tar --exclude=./.git -cf - .) | (cd "$d" && tar -xf -)
+  echo "Tes fichiers de $ancien sont recopiés dans le clone, sans commit. L'ancien dossier reste en place : ne t'en sers plus."
+fi
+echo "Dépôt prêt : $d. Suite : cd $d && git checkout -b agent/<sujet>, commite, puis forgejo-pr."
+SH
+  cat > "$CTX/forgejo-pr" <<'SH'
+#!/bin/sh
+# forgejo-pr "<titre>" "<description>" : depuis le dossier du projet, pousse la branche courante et ouvre la pull request vers main.
+set -eu
+t="${1:?Usage : forgejo-pr <titre> <description>}"; d="${2:-}"
+b=$(git rev-parse --abbrev-ref HEAD)
+[ "$b" != main ] || { echo "Tu es sur main : crée d’abord une branche agent/<sujet>." >&2; exit 1; }
+p=$(basename "$(git rev-parse --show-toplevel)")
+git push -u origin "$b"
+jq -n --arg h "$b" --arg t "$t" --arg d "$d" '{head:$h, base:"main", title:$t, body:$d}' \
+  | curl -fsS -H "Authorization: token $FORGEJO_TOKEN" -H 'Content-Type: application/json' -d @- \
+    "$FORGEJO_URL/api/v1/repos/$FORGEJO_ORG/$p/pulls" | jq -r '"Pull request ouverte : " + .html_url'
+SH
+  chmod 755 "$CTX/forgejo-nouveau-depot" "$CTX/forgejo-pr"
   construire opencode; rm -rf "$CTX"
   note "docs-builder (construite localement)"
   CTX="$(mktemp -d)"
@@ -2240,6 +2277,7 @@ EOF
   fait "Forgejo démarré : https://forge.$DOMAINE"
   fi
   if [[ -n "${HIBOU_MAJ:-}" ]]; then
+    consignes_agent   # les consignes de l’agent changent avec la version ; « configurer » n’est pas rejoué en mise à jour
     demarrer /srv/forgejo --force-recreate
     ADMIN="$HIBOU_ADMIN_NOM"; MDP="$HIBOU_ADMIN_MDP"
     etape "Open WebUI : modèles rebranchés sur les modèles installés"
@@ -2296,12 +2334,21 @@ Tu travailles pour Hibou, une IA locale et hors ligne. Rien ne sort de ce résea
 ## Forgejo (https://forge.$DOMAINE, organisation hibou)
 Les projets vivent dans /workspace/<projet>. Tu es le compte hibou-dev. Jeton : \$FORGEJO_TOKEN.
 
+Forgejo a une seule adresse : https://forge.$DOMAINE (\$FORGEJO_URL). Aucun autre nom n'existe.
+
+- Nouveau projet : commence par \`forgejo-nouveau-depot <projet>\`, avant d'écrire le moindre fichier (crée le dépôt et le clone dans /workspace/<projet>).
+- Une commande échoue deux fois de suite : arrête, lis le message, change d'approche ou pose la question.
 - Projet existant : \`git clone git@forge.$DOMAINE:hibou/<projet>.git /workspace/<projet>\`
-- Nouveau projet : crée le dépôt, puis clone-le :
-  \`curl -fsS -H "Authorization: token \$FORGEJO_TOKEN" -H 'Content-Type: application/json' -d '{"name":"<projet>","private":true,"auto_init":true,"default_branch":"main"}' \$FORGEJO_URL/api/v1/orgs/hibou/repos\`
-- Jamais de push sur main. Travaille sur une branche \`agent/<sujet>\`, pousse-la, puis ouvre une pull request :
-  \`curl -fsS -H "Authorization: token \$FORGEJO_TOKEN" -H 'Content-Type: application/json' -d '{"head":"agent/<sujet>","base":"main","title":"<titre>","body":"<ce qui change et comment le vérifier>"}' \$FORGEJO_URL/api/v1/repos/hibou/<projet>/pulls\`
+- Jamais de push sur main. Travaille sur une branche : \`git checkout -b agent/<sujet>\`, puis commite.
+- Ensuite, depuis le dossier du projet : \`forgejo-pr "<titre>" "<ce qui change et comment le vérifier>"\` (pousse la branche et ouvre la pull request).
 - Donne l'adresse de la pull request à la fin. Une personne la relit et la fusionne.
+
+## Hors ligne
+- Internet n'existe pas ici : pypi.org, npmjs.com, github.com et opencode.ai ne répondent pas. N'essaie pas.
+- pip et npm passent déjà par le miroir de Forgejo (\$PIP_INDEX_URL, ~/.npmrc). Un paquet absent du miroir : dis-le, ne contourne pas.
+- pytest est déjà installé : \`python3 -m pytest\`.
+- Pour un environnement Python : \`python3 -m venv .venv\`. Mets \`.venv/\`, \`__pycache__/\` et les fichiers générés dans \`.gitignore\` avant le premier \`git add\`.
+- Relis \`git status\` avant chaque commit : rien de généré ni de secret dans le dépôt.
 EOF
   chmod 644 /srv/hibou/AGENTS.md
 }
@@ -2481,15 +2528,18 @@ config_opencode() {  # modèles du serveur dev, avec leurs vraies limites de con
     IFS='|' read -r alias _ _ ctx args <<< "$ligne"
     [[ "$alias" == fim ]] || ! servi "$args" && continue
     # Sans limite déclarée, OpenCode suppose un contexte inconnu et compacte trop tard ou trop tôt.
-    modeles=$(jq -c --arg a "$alias" --argjson c "$ctx" --argjson o $(( ctx >= 131072 ? 32768 : 16384 )) \
+    # Sortie réservée : un quart du contexte au plus. Égale au contexte, OpenCode croit la fenêtre pleine et compacte à chaque tour.
+    modeles=$(jq -c --arg a "$alias" --argjson c "$ctx" --argjson o $(( ctx >= 131072 ? 32768 : ctx / 4 )) \
       '. + {($a): {name: $a, tool_call: true, limit: {context: $c, output: $o}}}' <<< "$modeles")
   done
+  # Refus immédiats : sans Internet ni droits root, ces commandes ne mènent nulle part et un petit modèle y perd des dizaines de tours.
   jq -n --arg p "$PRINCIPAL" --arg u "http://$HIBOU_IP_DEV:8080/v1" --arg k "$HIBOU_CLE_OPENCODE" --argjson m "$modeles" '{
     "$schema": "https://opencode.ai/config.json", theme: "hibou", autoupdate: false, share: "disabled",
     model: ("hibou/" + $p),
     provider: {hibou: {npm: "@ai-sdk/openai-compatible", name: "Hibou", options: {baseURL: $u, apiKey: $k}, models: $m}},
     permission: {edit: "allow", bash: {"*": "ask", "git status*": "allow", "git diff*": "allow", "git log*": "allow",
-      "ls*": "allow", "cat*": "allow", "grep*": "allow", "rg*": "allow", "git push*main*": "deny", "sudo*": "deny"}}
+      "ls*": "allow", "cat*": "allow", "grep*": "allow", "rg*": "allow", "git push*main*": "deny", "sudo*": "deny",
+      "apt*": "deny", "su *": "deny", "*--index-url*": "deny", "*--break-system-packages*": "deny"}}
   }' > /srv/hibou/opencode.json
   chmod 644 /srv/hibou/opencode.json
 }
@@ -2803,10 +2853,12 @@ amorcer_open_webui() {  # bundle jeton_redac
   jeton=$(curl -fsS "$u/auths/signup" -H 'Content-Type: application/json' -d "$ident" 2>/dev/null | jq -r .token) \
     || jeton=$(curl -fsS "$u/auths/signin" -H 'Content-Type: application/json' -d "$ident" | jq -r .token) || return 1
   local h=(-H "Authorization: Bearer $jeton" -H 'Content-Type: application/json')
-  if [[ -n "$2" ]]; then   # mise à jour : outil et jeton déjà en place
-  jq -n --rawfile c "$1/amorces/open-webui/publier_forgejo.py" \
-    '{id:"publier_forgejo",name:"Publier dans Forgejo",content:$c,meta:{description:"Dépose un document dans hibou-docs et ouvre une pull request."}}' \
-    | curl -fsS "${h[@]}" "$u/tools/create" -d @- >/dev/null 2>&1 || true
+  # Outil : créé, ou son code remplacé (une nouvelle version doit atteindre une installation existante).
+  local outil; outil=$(jq -n --rawfile c "$1/amorces/open-webui/publier_forgejo.py" \
+    '{id:"publier_forgejo",name:"Publier dans Forgejo",content:$c,meta:{description:"Dépose un document dans hibou-docs et ouvre une pull request."}}')
+  curl -fsS "${h[@]}" "$u/tools/create" -d "$outil" >/dev/null 2>&1 \
+    || curl -fsS "${h[@]}" "$u/tools/id/publier_forgejo/update" -d "$outil" >/dev/null || return 1
+  if [[ -n "$2" ]]; then   # installation : jeton de hibou-redac (en mise à jour, les valves déjà en place sont gardées)
   jq -nc --arg f "https://forge.$DOMAINE" --arg j "$2" '{forgejo_url:$f,depot:"hibou/hibou-docs",jeton:$j}' \
     | curl -fsS "${h[@]}" "$u/tools/id/publier_forgejo/valves/update" -d @- >/dev/null || return 1
   fi

@@ -63,7 +63,7 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 - Symptôme : étape « Docker, DNS, heure » : `E: Failed to fetch file:/home/hibou/hibou-bundle/apt/ubuntu/./Packages  File not found`, puis « L’installation dans la VM s’est arrêtée ».
 - Cause : `/home/hibou` est en 0750 (défaut Ubuntu 26.04). apt décompresse `Packages.gz` sous l'utilisateur `_apt` → `Permission denied` ; le message final ne cite que la dernière variante essayée (`Packages`).
 - Diff : `source_locale()` ajoute `-o APT::Sandbox::User=root` à `APT_HIBOU` (dépôt local de confiance ; droits du dossier personnel inchangés).
-- Test : dans la VM forge, `apt-get update` avec ces options : rc=0, `docker-ce` candidat 5:29.10.0. `autotest` OK. Script reporté dans les bundles (hôte et VM de téléchargement, `SHA256SUMS` à jour). Relance n° 2 de `installer forge` : « Docker, DNS, heure » passe (Docker installé, DNS et heure actifs). **Prouvé.**
+- Test : dans la VM forge, `apt-get update` avec ces options : rc=0, `docker-ce` candidat 5:29.10.0. `autotest` OK. Script reporté dans les bundles (hôte et VM, `SHA256SUMS` à jour). Relance n° 2 de `installer forge` : « Docker, DNS, heure » passe (Docker installé, DNS et heure actifs sur <adresse>). **Prouvé.**
 
 ## B6 — `installer forge` : clé SSH de l'agent refusée (bloquant, première installation)
 
@@ -79,7 +79,7 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 - Cause : Forgejo refuse `--skip-existing` ; le mot de passe passe en `-p` ; `main()` laisse remonter `CalledProcessError` (même risque pour le jeton dans l'URL du `git push`) ; `importer_miroir` affiche « Fait » après l'échec.
 - Diff (`hibou-miroir.py`) : un `twine upload` par fichier, 409/« already exists » compté comme déjà présent, comme pour npm ; identifiants par `TWINE_USERNAME`/`TWINE_PASSWORD` ;
   `main()` attrape `CalledProcessError` et n'affiche que la commande passée par `redact()`. (`hibou`) : « Fait » seulement si le push a réussi.
-- Test : `telecharger` `HIBOU_PARTIES=miroir` (VM de téléchargement, 2 min 34 s) : seule `miroir.tar.zst` réécrite ; recopie vers l'hôte : 193 Mo en 2 s ;
+- Test : `telecharger` `HIBOU_PARTIES=miroir` (VM, 2 min 34 s) : seule `miroir.tar.zst` réécrite ; recopie vers l'hôte : 193 Mo en 2 s ;
   `mettre-a-jour forge` n° 5 : 1 image rechargée (miroir), « pypi : 5 publiés », « npm : 1 publiés », échec git affiché avec `***` à la place du jeton. **Prouvé.**
 
 ## B8 — Base « Hibou · Templates » vide pour toujours si forge est installée avant doc (ordre documenté)
@@ -105,7 +105,7 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 - Cause : le conteneur `miroir` tourne en root, le dépôt monté appartient à `hibou` (uid 1000) ; git ≥ 2.35.2 refuse.
 - Diff (`hibou-miroir.py`) : `git -c safe.directory=<ce dépôt> …` (exception limitée au dépôt, rien de global).
 - Test : sur l'hôte, dépôt possédé par uid 1000, git root : refusé sans l'option, accepté avec. Chemin complet : `telecharger` miroir (2 min 30 s), recopie 193 Mo en 2 s, `mettre-a-jour forge` n° 7 :
-  `[new branch] master`, `octocat-patch-1`, `test` poussées ; « image publiée : forge.<domaine>/hibou/alpine:3.20 » ; « Fait Paquets publiés ». **Prouvé.**
+  `[new branch] master`, `octocat-patch-1`, `test` poussées ; « image publiée : forge.hibou.lan/hibou/alpine:3.20 » ; « Fait Paquets publiés ». **Prouvé.**
 
 ## B11 — `installer doc` : apt refuse d'installer le pilote (« Packages need to be removed but remove is disabled »)
 
@@ -157,6 +157,60 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 - Test : `mettre-a-jour forge` n° 12 et 13 : plus de traceback, « Hibou · Documentation » : 1 fichier. **Prouvé.**
 - Reste : le dépôt hibou-docs déjà créé dans Forgejo garde l'ancien `outils/synchroniser_owui.py` (amorcé à l'installation) ; le runner l'utilisera jusqu'à une PR qui le remplace. Les nouvelles installations ont la version corrigée.
 
+## B17 — OpenCode compacte la conversation à chaque tour (agent inutilisable sur le profil dev ≥ 4 Go)
+- Symptôme : test par l'API de la page web (« nouveau projet compteur-mots, poussé dans Forgejo ») : 172 messages en 947 s, aucun fichier, aucun dépôt.
+  Un tour sur deux est un résumé « ## Objective… » ; l'agent oublie ce qu'il vient de faire, redemande la marche à suivre, finit par réclamer un mot de passe.
+- Cause : `config_opencode` déclare `output: 16384` pour tout contexte < 128k. Sur `dev:5` (contexte 16 384), OpenCode réserve toute la fenêtre à la sortie :
+  place utile nulle, compaction après chaque appel. Le prompt système et les outils d'OpenCode pèsent déjà ~8 300 tokens (relevé par tour : 8 368 en entrée).
+- Diff : sortie réservée = contexte / 4 (32 768 au-delà de 128k, inchangé) ; `dev:5` passe de 16k à 32k de contexte.
+- Test VRAM (à la main, VM dev) : contexte 32k, prompt de 27 296 tokens : 42,7 s (680 tokens/s en lecture), pic 3 675 Mio sur 4 096, aucune erreur mémoire.
+- Autres constats du même test (modèle 4B, pas le script) : tente `opencode.ai` (hors ligne), invente `git.forge.hibou.lan` au lieu de `$FORGEJO_URL`
+  (erreur TLS), renomme le projet en anglais.
+
+## B18 — Agent OpenCode hors ligne : pas de pytest, venv commité, tentatives vers Internet
+- Constat (test web n° 2, après B17) : chaîne complète en 10 min 41 s, 2 compactions seulement : dépôt `compteur-mots` créé, cloné dans `/workspace/compteur-mots`,
+  branche `agent/compteur-mots`, commit, push, PR n° 1 ouverte. Mais : `pytest` introuvable (ni dans l'image, ni dans le miroir, qui ne contient que l'exemple `requests`) ;
+  l'agent essaie `pip --break-system-packages`, `apt-get`, pypi.org, files.pythonhosted.org (une dizaine de tours perdus), crée `venv/` dans le projet,
+  `git add -A` puis commit : **le dépôt contient tout `venv/`** (pip compris) ; il supprime `venv/` après le commit, sans le retirer de l'historique.
+- Cause : image `opencode` sans outil de test ; `AGENTS.md` muet sur le hors-ligne, le miroir et `.gitignore`.
+- Diff : `python3-pytest` dans l'image `opencode` ; `AGENTS.md` : section « Hors ligne » (Internet absent, miroir pip/npm déjà configuré, pytest présent,
+  `.venv/` et `__pycache__/` dans `.gitignore` avant le premier `git add`, relire `git status` avant chaque commit).
+- `mettre-a-jour` ne rejouait pas `consignes_agent` (seulement dans `configurer`, sauté en mise à jour) : une nouvelle version des consignes n'atteignait
+  jamais une installation existante. Diff : `consignes_agent` appelé aussi en mise à jour. Test : `mettre-a-jour forge` n° 16 : section présente dans le conteneur.
+- Terminal n° 1 (interface texte `opencode` dans le conteneur, projet `convertisseur-temperatures`) : 4 min 40 s ; dépôt, clone, branche, **21 tests pytest réussis**,
+  commit propre (3 fichiers, aucun `venv/`), push. Mais adresse inventée (`api.forge.hibou.lan`) au premier essai et **pas de PR** : JSON du `curl` cassé (« no URL specified »).
+- Diff n° 2 : commandes `forgejo-nouveau-depot <projet>` et `forgejo-pr "<titre>" "<description>"` dans l'image (JSON par `jq`, adresse et organisation lues
+  dans l'environnement) ; consignes : une seule adresse de Forgejo, ces deux commandes au lieu des `curl`.
+- Web n° 3 (`compteur-lignes`) : code et tests faits d'abord dans un dossier créé à la main (`git init`), puis `forgejo-nouveau-depot` : dépôt créé,
+  clone refusé (dossier existant), puis 409 à chaque appel ; le 4B répète la même commande ~90 fois (6 min). Ni push ni PR.
+- Diff n° 3 : `forgejo-nouveau-depot` : dossier déjà cloné → rien à faire ; dossier local → mis de côté (`<projet>.avant-depot`), clone, fichiers recopiés ;
+  consignes : commencer par cette commande ; deux échecs de suite → changer d'approche.
+  Test à la main dans le conteneur sur le cas exact : rc=0, fichiers recopiés ; second appel : « Déjà cloné » ; `forgejo-pr` : branche poussée, PR n° 1 ouverte.
+
+## B19 — Documents publiés par l'IA doc refusés par le runner (style Markdown)
+- Constat : rédaction par `hibou-procedure` (doc ≥ 4 Go), publication par l'outil `publier_forgejo` : PR ouvertes dans hibou-docs (branche `redaction/…`, compte hibou-redac),
+  mais le runner échoue : PR n° 1 : 2 erreurs (URL nue MD034, saut de ligne final MD047) ; PR n° 2 : 11 erreurs (blocs de code sans langage ni lignes vides, MD031/MD040, MD047).
+- Cause : le prompt ne dit rien des règles de `markdownlint` ; un petit modèle ne les devine pas.
+- Diff : `publier_forgejo` 0.2.0 : `normaliser()` avant publication (langage `text` et lignes vides autour des blocs de code, adresses nues entre chevrons,
+  un seul saut de ligne final ; texte inchangé) ; prompt des 5 modèles : règle en une ligne. Fichier, générateur (`generer-amorces.py`) et `modeles-hibou.json` alignés.
+- Test : les deux documents refusés, passés par `normaliser()` puis `markdownlint-cli2` du runner : 13 erreurs → 0.
+  Page de chat (WebSocket, deux tours « rédige » puis « oui, publie-la ») : PR n° 3, runner **success** (« 0 issues », « Job succeeded »). **Prouvé.**
+
+## B20 — `mettre-a-jour forge` ne remplace jamais le code de l'outil Open WebUI
+- Symptôme : après B19 et `mettre-a-jour forge` n° 20, prompt à jour dans Open WebUI mais outil `publier_forgejo` toujours en 0.1.0.
+- Cause : `amorcer_open_webui` ne crée l'outil que si un jeton est passé (installation) ; en mise à jour, rien (commentaire inversé : « mise à jour : outil et jeton déjà en place »).
+- Diff : outil créé ou mis à jour (`/tools/id/publier_forgejo/update`) à chaque passage ; valves (jeton de hibou-redac) écrites seulement à l'installation.
+- Test : `mettre-a-jour forge` n° 21 : `normaliser` présent dans l'outil, jeton conservé, dépôt `hibou/hibou-docs`. **Prouvé** (puis PR n° 3 ci-dessus).
+
+## Constats sur les agents (doc et dev), profil ≥ 4 Go
+- Où vont les fichiers : **dev** (OpenCode, conteneur sur forge) écrit dans `/workspace/<projet>` = `/srv/workspace/<projet>` de la VM forge (uid 1000), un clone par projet.
+  **doc** (Open WebUI) n'écrit aucun fichier : l'outil dépose le document par l'API de Forgejo, directement dans hibou-docs (`docs/<dossier>/<nom>.md`).
+- Quand ça pousse : jamais à chaque étape. dev : un commit puis `forgejo-pr` (push de la branche `agent/<sujet>` + PR) quand le travail est fini ; jamais sur main (refusé).
+  doc : une branche `redaction/<chemin>-<date>` + un commit + une PR par document, seulement après validation par l'utilisateur (le prompt le demande).
+- La fusion reste humaine dans les deux cas ; le runner vérifie les PR de hibou-docs.
+- Limites du 4B (pas du script) : adresses inventées, boucles sur une commande en échec, `rm -rf .git` proposé (refusable dans l'interface), tests parfois vides.
+  Résultats : terminal n° 2 complet en 2 min 12 s (PR ouverte) ; web n° 4 : code et 10 tests corrects, mais clone détruit et pas de PR.
+
 ## N4 — L'évaluation note les erreurs d'API comme des réponses
 
 - Constat : une réponse `[erreur API : …]` reçoit 33 % (« en-tête, sections »), la synthèse affiche « 0.0 tokens/s » sans alerte. Un serveur en panne passe pour un modèle médiocre.
@@ -170,8 +224,9 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 
 ## Mesures de référence — profil ≥ 4 Go (une carte de 4 Go, processeur sans AVX2)
 
-- `installer forge` sur une installation neuve : rc=0 ; `mettre-a-jour forge` : 2 à 3 min (une image rechargée au plus).
+- `installer forge` sur une installation neuve : rc=0 ; `mettre-a-jour forge` : 2 à 3 min.
 - `installer doc` : rc=0 ; 3,1 Go de mémoire vidéo ; évaluation doc **93 %**, vision **100 %**, 22 tokens/s, ~5 min.
-- `installer dev` : rc=0 du premier coup (~15 min) ; 4B + complétion : 3,5 Go ; évaluation code **75 %**, 22 tokens/s, ~1 min 35 s.
-- Complétion (1.5B Q8 sur le processeur) : 13 à 16 tokens/s seule, 1,5 à 1,8 s par complétion courte. Un processeur avec AVX2 fera mieux.
-- Une carte par rôle GPU : doc et dev ne peuvent pas tourner ensemble sur une seule carte (la VM qui démarre la première la prend).
+- `installer dev` : rc=0 du premier coup (~15 min) ; 4B en contexte 32k + complétion sur le processeur : 3,7 Go au plus ; évaluation code **75 %**, 22 tokens/s.
+- Complétion (1.5B Q8 sur le processeur) : 13 à 16 tokens/s seule. Un processeur avec AVX2 fera mieux.
+- Agent OpenCode (4B) : de la demande à la PR en 2 à 5 min quand tout va bien ; voir B17, B18 et les constats ci-dessus pour les limites.
+- Une carte par rôle GPU : doc et dev ne tournent pas ensemble sur une seule carte.

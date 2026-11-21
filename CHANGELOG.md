@@ -9,6 +9,9 @@ Détail, symptômes et preuves : `JOURNAL-CORRECTIONS.md`.
 - Miroir : PyPI publié fichier par fichier sans mot de passe dans les journaux (B7), dépôts git complets (B9) et acceptés par git (B10).
 - Open WebUI : base Templates remplie dès que doc répond (B8), embeddings sans 429 (B15), synchronisation de la documentation par `reset` (B16).
 - Évaluation : une erreur d'API compte 0 et est signalée (N4).
+- Agent OpenCode : sortie réservée = contexte / 4 (B17 : il compactait à chaque tour) ; `dev:5` en contexte 32k ; `pytest` dans l'image,
+  consignes « Hors ligne », commandes `forgejo-nouveau-depot` et `forgejo-pr`, refus immédiats (`apt`, `su`, `--index-url`…), consignes rejouées en mise à jour (B18).
+- Rédaction : `publier_forgejo` 0.2.0 met le Markdown aux règles du runner avant publication (B19) ; l'outil est mis à jour à chaque `mettre-a-jour forge` (B20).
 
 ## 0.1.0
 - Script `hibou` : `telecharger`, `verifier`, `installer` (pve, forge, doc, dev).

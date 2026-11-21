@@ -1,7 +1,7 @@
 """
 title: Publier dans Forgejo
 author: Hibou
-version: 0.2.0
+version: 0.3.0
 description: Dépose un document Markdown dans hibou-docs, sur une branche, et ouvre une pull request.
 """
 import base64, datetime, re
@@ -68,16 +68,20 @@ class Tools:
         contenu = normaliser(contenu)
         if not contenu.startswith("---"):
             return "Le document doit commencer par son en-tête YAML (modele, titre)."
-        auteur = (__user__ or {}).get("name", "inconnu")
-        branche = "redaction/" + re.sub(r"[^a-z0-9-]", "-", chemin[5:-3]) + datetime.datetime.now().strftime("-%Y%m%d%H%M")
+        auteur = (__user__ or {}).get("name") or "inconnu"
+        courriel = (__user__ or {}).get("email") or ""
+        # Une branche par personne (redaction/<personne>/…) ; le site docs montre tout ce qui est fusionné dans main.
+        personne = re.sub(r"[^a-z0-9-]", "-", (courriel.split("@")[0] or auteur).lower()).strip("-") or "inconnu"
+        branche = f"redaction/{personne}/" + re.sub(r"[^a-z0-9-]", "-", chemin[5:-3]) + datetime.datetime.now().strftime("-%Y%m%d%H%M")
         try:
             self._api("POST", "/branches", json={"new_branch_name": branche, "old_branch_name": "main"})
             self._api("POST", f"/contents/{chemin}", json={
                 "branch": branche, "message": f"Rédaction : {titre}",
+                **({"author": {"name": auteur, "email": courriel}} if courriel else {}),
                 "content": base64.b64encode(contenu.encode()).decode()})
             pr = self._api("POST", "/pulls", json={
                 "head": branche, "base": "main", "title": titre,
-                "body": f"Document rédigé avec Hibou pour {auteur}. Le runner vérifie le style, les sections et les schémas."})
+                "body": f"Demandé par {auteur}" + (f" ({courriel})" if courriel else "") + ", rédigé avec Hibou. Le runner vérifie le style, les sections et les schémas."})
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 422:
                 return "Ce fichier existe déjà sur main. Choisis un autre chemin, ou modifie-le dans Forgejo."

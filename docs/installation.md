@@ -1,88 +1,111 @@
 # Installation pas à pas
 
-Les commandes se tapent en root ou avec `sudo`. Ordre : VM de téléchargement, hôte Proxmox, VM forge, conteneur doc, Precision 5820, postes clients.
+Trois temps : préparer le bundle sur une machine connectée, l’apporter sur un disque, installer chaque rôle depuis
+son hôte Proxmox. Les commandes d’installation se lancent en root sur l’hôte ; le script crée lui-même les VM.
 
-## 1. Préparer le disque USB
+## 0. Avant de commencer
 
-Sur la VM de téléchargement. Vérifie le nom du disque avec `lsblk` : le formatage efface tout.
+- **Hôtes GPU** (doc, dev) : Proxmox VE 9 (version essayée), cartes NVIDIA, BIOS avec la virtualisation (VT-x/VT-d ou AMD-V/IOMMU)
+  et « Above 4G decoding » activés. Le script vérifie l’IOMMU et confie les cartes à `vfio-pci` sans redémarrer l’hôte.
+- **forge** : un nœud Proxmox quelconque (ou un cluster). 2 cœurs, 12 Go de RAM et 80 Go de disque au minimum.
+- **Stockages Proxmox** : un pour les disques des VM, un pour les sauvegardes de forge (type « VZDump backup file »).
+- **Réseau** : un pont Proxmox (par exemple `vmbr1`) relié au réseau isolé, et quatre adresses libres (forge, doc, dev,
+  plus celles des hôtes). Aucune passerelle vers Internet n’est nécessaire.
+- **Machine connectée** : Ubuntu avec Docker, python3-venv, git, zstd, openssl, rsync, et un **disque séparé** pour le
+  bundle (20 à 300 Go selon les profils). Le script refuse d’écrire le bundle sur le disque système.
+
+## 1. Préparer le bundle
 
 ```bash
-lsblk
-sudo mkfs.ext4 -L HIBOU /dev/sdb1
-sudo mkdir -p /mnt/hibou
-sudo mount /dev/disk/by-label/HIBOU /mnt/hibou
+./hibou autotest
+./hibou telecharger /mnt/hibou/bundle
 ```
 
-## 2. Construire le bundle
+Le menu demande :
+
+| Question | Exemple |
+| --- | --- |
+| Domaine | `hibou.lan` |
+| Réseau, passerelle | `10.99.0.0/24`, vide |
+| Pont, VLAN | `vmbr1`, vide |
+| Adresses forge, doc, dev | `10.99.0.10`, `10.99.0.20`, `10.99.0.30` |
+| Adresses des hôtes Proxmox doc et dev | celles de leurs hôtes (identiques si un seul hôte) |
+| Numéros de VM, disques | `210`, `220`, `230` ; 80, 150, 150 Go |
+| forge : mémoire, cœurs | 12 Go, 2 |
+| Stockages | disques des VM, sauvegardes |
+| Cartes de dev et de doc | modèle et nombre ; le profil conseillé suit la mémoire vidéo |
+| Génération d’images | « Non », ou une carte dédiée |
+| Miroir | versions de Python, listes pip, npm, git, images Docker |
+| Administrateur, utilisateurs | dans l’ordre de priorité ; équipes doc, dev ou les deux |
+| Phrase de passe | chiffre les secrets du bundle |
+
+Puis contrôle et taille :
 
 ```bash
-sudo apt install -y docker.io python3-venv zstd
-sudo ./hibou telecharger /mnt/hibou/hibou-bundle-$(date +%Y%m%d)
+./hibou verifier /mnt/hibou/bundle
+du -sh /mnt/hibou/bundle
 ```
 
-Ajoute à la main dans `hibou-bundle-*/extra/` l’ISO Ubuntu 26.04 serveur et le modèle LXC `ubuntu-26.04-standard_*.tar.zst`.
+Un second passage (« La garder », versions gardées) ne retélécharge rien qui n’a pas changé.
+Lance toujours `telecharger` avec le même utilisateur.
+
+## 2. Apporter le bundle
+
+Démonte le disque et branche-le sur l’hôte Proxmox de forge (ou copie le dossier). Puis, sur cet hôte :
 
 ```bash
-sync && sudo umount /mnt/hibou
-```
-
-## 3. Hôte Proxmox (7910)
-
-```bash
-mkdir -p /mnt/hibou && mount /dev/disk/by-label/HIBOU /mnt/hibou
-cd /mnt/hibou/hibou-bundle-*
+cd /mnt/hibou/bundle
 ./hibou verifier
-./hibou installer pve
-reboot
 ```
 
-Après le redémarrage, `nvidia-smi` doit lister 4 cartes. Copie l’ISO dans `/var/lib/vz/template/iso/` et le modèle LXC dans `/var/lib/vz/template/cache/`, puis crée la VM `forge` et le conteneur `doc`.
+## 3. forge
 
 ```bash
-cat /root/hibou-lxc-doc.conf >> /etc/pve/lxc/<id>.conf
-pct set <id> -mp0 /mnt/hibou,mp=/mnt/hibou
-pct start <id>
+./hibou installer forge
 ```
 
-## 4. VM forge
+Le script crée la VM, installe Docker, Forgejo, Open WebUI, OpenCode, Caddy, la supervision, le runner, le relecteur,
+publie le miroir et configure la connexion unique (y compris celle de Proxmox par Forgejo). Il écrit sur forge
+`/root/hibou-acces.txt` : clés d’API des utilisateurs, adresses, commande Proxmox.
 
-Démonte le disque sur l’hôte (`umount /mnt/hibou`), puis passe-le à la VM : Matériel > Ajouter > Périphérique USB.
+## 4. doc et dev
 
-```bash
-sudo mkdir -p /mnt/hibou && sudo mount /dev/disk/by-label/HIBOU /mnt/hibou
-cd /mnt/hibou/hibou-bundle-*
-sudo ./hibou installer forge
-```
-
-Le script affiche la commande de création du compte administrateur et celle qui récupère le certificat racine. Retire ensuite le périphérique USB de la VM et remonte le disque sur l’hôte.
-
-## 5. Conteneur LXC doc
+Sur l’hôte des cartes doc, puis sur celui des cartes dev :
 
 ```bash
-pct enter <id>
-cd /mnt/hibou/hibou-bundle-*
 ./hibou installer doc
+./hibou installer dev
 ```
 
-## 6. Precision 5820
+Un hôte partagé avec d’autres VM : limite la VM GPU avec `HIBOU_RAM_GPU=<Go> HIBOU_CPU_GPU=<fils>`.
+À la fin, le script vérifie `nvidia-smi`, l’API du serveur, et lance une première évaluation des modèles.
+
+Si doc est installé après forge (cas normal), relance une fois `./hibou mettre-a-jour forge` : la base
+« Hibou · Templates » du chat a besoin des embeddings de doc pour se remplir.
+
+## 5. Postes clients
+
+- Résolution des noms : utilise forge comme DNS (il sert tout le domaine), ou ajoute dans `/etc/hosts` l’adresse de
+  forge pour `forge`, `chat`, `code`, `docs`, `supervision`, `etat`, `alertes`, `registry`, `llm-doc`, `llm-dev`.
+- Certificat : installe l’autorité de Hibou, `/srv/hibou/hibou-ca.crt` sur forge.
+- Ouvre `https://forge.<domaine>` : chaque compte change son mot de passe à la première connexion, puis se connecte
+  partout avec Forgejo.
+
+## 6. Mettre à jour
 
 ```bash
-sudo mkdir -p /mnt/hibou && sudo mount /dev/disk/by-label/HIBOU /mnt/hibou
-cd /mnt/hibou/hibou-bundle-*
-sudo ./hibou installer dev
-sudo reboot
+./hibou telecharger /mnt/hibou/bundle      # sur la machine connectée, même disque
+./hibou mettre-a-jour forge                # puis doc, dev selon ce qui a changé
 ```
 
-Vérifie avec `nvidia-smi` et `docker compose -f /srv/hibou/compose.yaml ps`. Le script peut être relancé sans risque.
+Seul ce qui a changé est copié et rechargé ; comptes, dépôts, conversations et sessions de l’agent sont conservés.
+Pour changer de cartes ou de profil : « Changer seulement les cartes et les modèles » au menu de `telecharger`.
 
-## 7. Postes clients
+## 7. Dépannage
 
-```
-192.168.x.10  forge.hibou.lan registry.hibou.lan
-192.168.x.11  chat.hibou.lan llm-doc.hibou.lan
-192.168.x.12  code.hibou.lan llm-dev.hibou.lan
-```
-
-Installe le certificat racine récupéré à l’étape 4, puis ouvre `https://forge.hibou.lan`, `https://chat.hibou.lan` et `https://code.hibou.lan`.
-
-Autre domaine : préfixe chaque installation par `HIBOU_DOMAINE=mondomaine`.
+| Symptôme | Que faire |
+| --- | --- |
+| Une étape échoue | Lis le message, corrige, relance la même commande : les étapes faites sont rapides. `HIBOU_SAUTER=vm,copie` pour en sauter. |
+| « Service(s) qui redémarrent en boucle » | `docker compose -f /srv/forgejo/compose.yaml logs --tail 50 <service>` sur forge |
+| Le chat ne répond pas | `curl http://<ip-doc>:8080/health` depuis forge ; depuis ailleurs, c’est refusé (pare-feu) |
+| L’agent ne trouve pas un paquet | Ajoute-le aux listes du miroir, puis `telecharger` et `mettre-a-jour forge` |

@@ -311,8 +311,8 @@ configurer_bundle() {  # dossier
   demander HIBOU_IP_FORGE "Adresse de la VM forge (applications, sur le cluster)" "" "$RE_IP"
   demander HIBOU_IP_DOC "Adresse de la VM doc" "" "$RE_IP"
   demander HIBOU_IP_DEV "Adresse de la VM dev" "" "$RE_IP"
-  demander HIBOU_IP_PVE_DOC "Adresse de l’hôte Proxmox R730 doc" "" "$RE_IP"
-  demander HIBOU_IP_PVE_DEV "Adresse de l’hôte Proxmox R730 dev" "" "$RE_IP"
+  demander HIBOU_IP_PVE_DOC "Adresse de l’hôte Proxmox doc (celui des cartes doc)" "" "$RE_IP"
+  demander HIBOU_IP_PVE_DEV "Adresse de l’hôte Proxmox dev (celui des cartes dev)" "" "$RE_IP"
   demander HIBOU_IP_CLUSTER "Adresses des nœuds du cluster à superviser (séparées par des espaces)" "" '^[0-9. ]*$'
 
   etape "Machines virtuelles"
@@ -324,7 +324,7 @@ configurer_bundle() {  # dossier
   demander HIBOU_DISQUE_DEV "Disque de dev (Go)" 600 '^[0-9]+$'
   demander HIBOU_RAM_FORGE "Mémoire de forge (Go)" 32 '^[0-9]+$'
   demander HIBOU_CPU_FORGE "Cœurs de forge" 8 '^[0-9]+$'
-  note "doc et dev prennent toute la mémoire et tous les cœurs de leur R730, moins 16 Go et 4 fils pour Proxmox."
+  note "doc et dev prennent toute la mémoire et tous les cœurs de leur hôte, moins 16 Go et 4 fils pour Proxmox (HIBOU_RAM_GPU, HIBOU_CPU_GPU pour moins)."
   demander HIBOU_STOCKAGE "Stockage Proxmox des disques (vide = celui qui a le plus de place)" "" '^[A-Za-z0-9_-]*$'
   note "Sauvegarde de forge obligatoire : comptes, dépôts, conversations, documentation, supervision."
   note "Choisis un stockage sur d’autres disques que la VM (Proxmox Backup Server, NFS, disque dédié)."
@@ -847,6 +847,13 @@ telecharger() {
     docker pull -q --platform linux/amd64 "$fige" >/dev/null && docker tag "$fige" "$ref"
     enregistrer "$nom" "$ref" "$fige"
   done
+  # Export PDF (outil exporter_document) : fpdf2 et ses dépendances, prises par le pip de l’image Open WebUI (même Python).
+  if actualiser owui-py || ! ls "$SORTIE/owui-py"/fpdf2-*.whl >/dev/null 2>&1; then
+    rm -rf "$SORTIE/owui-py"; install -d "$SORTIE/owui-py"
+    docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$SORTIE/owui-py:/o" --entrypoint pip "${IMAGES[open-webui]}" \
+      download -q --no-cache-dir --no-deps -d /o fpdf2 fonttools defusedxml >/dev/null
+    verrou_ecrire owui-py "$(cd "$SORTIE/owui-py" && ls *.whl | sed 's/-py.*//;s/-cp.*//' | tr '\n' ',' | sed 's/,$//')"
+  fi
   note "opencode (construite localement)"
   actualiser opencode && verrou_ecrire opencode "$(docker run --rm node:22-bookworm-slim npm view opencode-ai version 2>/dev/null)"
   local OPENCODE_VERSION; OPENCODE_VERSION=$(verrou_lire opencode)
@@ -1061,8 +1068,8 @@ EOF
   (( taille <= CAPACITE_SUPPORT_GO * 90 / 100 )) || note "Le bundle dépasse 90 % du support de ${CAPACITE_SUPPORT_GO} Go (HIBOU_SUPPORT_GO)."
   dire "Copie le dossier sur le disque USB (ext4), branche-le sur un hôte Proxmox et lance :"
   note "sudo ./hibou installer forge   (sur un nœud du cluster)"
-  note "sudo ./hibou installer doc     (sur le R730 doc)"
-  note "sudo ./hibou installer dev     (sur le R730 dev)"
+  note "sudo ./hibou installer doc     (sur l’hôte des cartes doc)"
+  note "sudo ./hibou installer dev     (sur l’hôte des cartes dev)"
 }
 
 # ─── Vérification ───────────────────────────────────────────────────────────
@@ -1343,7 +1350,7 @@ gpu_vfio() {
   local ids d p drv n=0
   [[ -n "$(lspci -d 10de: 2>/dev/null)" ]] || erreur "Je ne vois aucune carte NVIDIA sur cet hôte." "Vérifie le montage des cartes et leur alimentation."
   [[ -n "$(ls /sys/kernel/iommu_groups 2>/dev/null)" ]] \
-    || erreur "L’IOMMU est inactive." "Dans le BIOS du R730 : Processor Settings > Virtualization Technology = Enabled, et Integrated Devices > Memory Mapped I/O above 4GB = Enabled. Redémarre puis relance."
+    || erreur "L’IOMMU est inactive." "Dans le BIOS : virtualisation (VT-x/VT-d ou AMD-V/IOMMU) activée, et « Above 4G decoding » / « Memory Mapped I/O above 4GB » activé. Redémarre puis relance."
   ids=$(lspci -n -d 10de: | awk '{print $3}' | sort -u | paste -sd,)
   printf 'options vfio-pci ids=%s disable_vga=1\nsoftdep nouveau pre: vfio-pci\nsoftdep nvidia pre: vfio-pci\n' "$ids" > /etc/modprobe.d/hibou-vfio.conf
   printf 'blacklist nouveau\nblacklist nvidiafb\nblacklist nvidia\n' > /etc/modprobe.d/hibou-blacklist.conf
@@ -1460,6 +1467,7 @@ copier_vers_vm() {  # rôle bundle adresse ; rsync ne transfère que ce qui a ch
     for alias in $(modeles_du_role "$role"); do (cd "$b" && find "models/$role/$alias" -type f); done
     # Dossiers vides compris : un dépôt git nu sans refs/ (références dans packed-refs) n’est plus reconnu par git.
     [[ "$role" == forge && -d "$b/mirror" ]] && (cd "$b" && find mirror -type f -o -type d -empty)
+    [[ "$role" == forge && -d "$b/owui-py" ]] && (cd "$b" && find owui-py -type f)
   } > "$liste"
   etape "Copie du bundle $role vers la VM"
   # Modèles retirés du profil : effacés de la copie dans la VM, le reste n’est pas retransféré.
@@ -2035,6 +2043,10 @@ installer_forge() {
   if ! saute config; then
   etape "Forgejo, registre, applications"
   install -d /srv/forgejo/data/gitea /srv/forgejo/runner /srv/registry /srv/docs-site /srv/hibou /srv/workspace /srv/opencode
+  # Modules Python livrés pour Open WebUI (export PDF), décompressés et montés en lecture seule.
+  rm -rf /srv/hibou/owui-py; install -d /srv/hibou/owui-py
+  local roue; for roue in "$b"/owui-py/*.whl; do [[ -f "$roue" ]] && python3 -m zipfile -e "$roue" /srv/hibou/owui-py; done
+  [[ -d /srv/hibou/owui-py/fpdf ]] || note "fpdf2 absent du bundle : l’export PDF sera indisponible (Word, PowerPoint et Excel restent possibles)."
   if [[ ! -s /srv/forgejo/secrets.env ]]; then
     local s; umask 077
     for s in SECRET_KEY INTERNAL_TOKEN; do
@@ -2182,6 +2194,7 @@ services:
     ports: ["127.0.0.1:8081:8080"]
     volumes:
       - open-webui:/app/backend/data
+      - /srv/hibou/owui-py:/app/hibou-py:ro
       - /srv/hibou/ca-bundle.crt:/etc/hibou/ca-bundle.crt:ro
       - /srv/hibou/charte/open-webui/custom.css:/app/backend/open_webui/static/custom.css
       - /srv/hibou/charte/open-webui/hibou:/app/backend/open_webui/static/hibou:ro
@@ -2364,8 +2377,9 @@ Forgejo a une seule adresse : https://forge.$DOMAINE (\$FORGEJO_URL). Aucun autr
 ## Hors ligne
 - Internet n'existe pas ici : pypi.org, npmjs.com, github.com et opencode.ai ne répondent pas. N'essaie pas.
 - pip et npm passent déjà par le miroir de Forgejo (\$PIP_INDEX_URL, ~/.npmrc). Un paquet absent du miroir : dis-le, ne contourne pas.
-- pytest est déjà installé : \`python3 -m pytest\`.
-- Pour un environnement Python : \`python3 -m venv .venv\`. Mets \`.venv/\`, \`__pycache__/\` et les fichiers générés dans \`.gitignore\` avant le premier \`git add\`.
+- pytest est déjà installé dans le système : \`python3 -m pytest\`.
+- Pour un environnement Python : \`python3 -m venv --system-site-packages .venv\` (garde pytest ; un .venv isolé ne le voit pas et le miroir ne l'a pas forcément).
+- Installe sans numéro de version (\`pip install requests\`, \`npm install is-number\`) : le miroir n'a que les versions copiées. Mets \`.venv/\`, \`__pycache__/\` et les fichiers générés dans \`.gitignore\` avant le premier \`git add\`.
 - Relis \`git status\` avant chaque commit : rien de généré ni de secret dans le dépôt.
 - N'affiche jamais \$FORGEJO_TOKEN ni l'environnement : la conversation est visible par l'équipe.
 EOF
@@ -2571,7 +2585,8 @@ config_opencode() {  # modèles du serveur dev, avec leurs vraies limites de con
     chmod 644 "/srv/hibou/opencode/$nom.json"
     install -d -o 1000 -g 1000 "/srv/workspace/$nom" "/srv/opencode/$nom"
   done < <(utilisateurs_dev)
-  local ancien; ancien=$(find /srv/workspace -mindepth 1 -maxdepth 1 -printf '%f\n' | grep -vxF -f <(utilisateurs_dev | cut -d' ' -f1) | tr '\n' ' ')
+  # awk et non grep -v : « rien trouvé » n’est pas une erreur (grep sort en 1 et arrêtait la mise à jour).
+  local ancien; ancien=$(awk 'NR==FNR {u[$1]; next} !($0 in u)' <(utilisateurs_dev) <(find /srv/workspace -mindepth 1 -maxdepth 1 -printf '%f\n') | tr '\n' ' ')
   [[ -z "${ancien// }" ]] || note "Dans /srv/workspace, hors des espaces personnels (version précédente, partagée) : $ancien. Déplace-les dans /srv/workspace/<utilisateur>."
 }
 
@@ -2920,7 +2935,7 @@ EOF
   umask 022
   fait "Clés d’API et commande Proxmox dans $acces (lisible par root seulement)."
   note "Uptime Kuma : crée son administrateur sur https://etat.$DOMAINE au premier accès."
-  printf '\n'; dire "Forge configurée. Installe maintenant doc et dev depuis leur R730."
+  printf '\n'; dire "Forge configurée. Installe maintenant doc et dev depuis leurs hôtes."
 }
 
 # Premier administrateur d’Open WebUI créé par l’API, puis outil, modèles et base de templates.
@@ -2931,17 +2946,50 @@ amorcer_open_webui() {  # bundle jeton_redac
   jeton=$(curl -fsS "$u/auths/signup" -H 'Content-Type: application/json' -d "$ident" 2>/dev/null | jq -r .token) \
     || jeton=$(curl -fsS "$u/auths/signin" -H 'Content-Type: application/json' -d "$ident" | jq -r .token) || return 1
   local h=(-H "Authorization: Bearer $jeton" -H 'Content-Type: application/json')
+  # Open WebUI 0.13 : sans autorisation, une ressource n’est visible que de l’administrateur (« Model not found » pour les autres).
+  # Modèles de chat, outils et bases Hibou : lecture pour tous les comptes.
+  local public='[{"principal_type":"user","principal_id":"*","permission":"read"}]'
   # Modèle lu sur l’entrée : créé, ou mis à jour s’il existe (Open WebUI répond 401 à la création d’un identifiant déjà pris).
   modele_owui() {
-    local m; m=$(cat)
+    local m; m=$(jq -c --argjson g "$public" 'if .is_active then .access_grants = $g else . end')
     curl -fsS "${h[@]}" "$u/models/create" -d "$m" >/dev/null 2>&1 \
-      || curl -fsS "${h[@]}" "$u/models/model/update?id=$(jq -r .id <<< "$m")" -d "$m" >/dev/null
+      || curl -fsS "${h[@]}" "$u/models/model/update?id=$(jq -r .id <<< "$m")" -d "$m" >/dev/null || return 1
+    # La mise à jour ignore access_grants : les droits ont leur propre point d’entrée.
+    [[ "$(jq -r .is_active <<< "$m")" != true ]] \
+      || jq -c '{id, access_grants}' <<< "$m" | curl -fsS "${h[@]}" "$u/models/model/access/update" -d @- >/dev/null
   }
   # Outil : créé, ou son code remplacé (une nouvelle version doit atteindre une installation existante).
   local outil; outil=$(jq -n --rawfile c "$1/amorces/open-webui/publier_forgejo.py" \
-    '{id:"publier_forgejo",name:"Publier dans Forgejo",content:$c,meta:{description:"Dépose un document dans hibou-docs et ouvre une pull request."}}')
+    --argjson g "$public" '{id:"publier_forgejo",name:"Publier dans Forgejo",content:$c,access_grants:$g,meta:{description:"Dépose un document dans hibou-docs et ouvre une pull request."}}')
   curl -fsS "${h[@]}" "$u/tools/create" -d "$outil" >/dev/null 2>&1 \
     || curl -fsS "${h[@]}" "$u/tools/id/publier_forgejo/update" -d "$outil" >/dev/null || return 1
+  curl -fsS "${h[@]}" "$u/tools/id/publier_forgejo/access/update" -d "{\"access_grants\":$public}" >/dev/null || return 1
+  # Export de documents (Word, PDF, PowerPoint, Excel) téléchargeables dans le chat.
+  outil=$(jq -n --rawfile c "$1/amorces/open-webui/exporter_document.py" \
+    --argjson g "$public" '{id:"exporter_document",name:"Exporter un document",content:$c,access_grants:$g,meta:{description:"Crée un fichier Word, PDF, PowerPoint ou Excel à télécharger dans le chat."}}')
+  curl -fsS "${h[@]}" "$u/tools/create" -d "$outil" >/dev/null 2>&1 \
+    || curl -fsS "${h[@]}" "$u/tools/id/exporter_document/update" -d "$outil" >/dev/null || return 1
+  curl -fsS "${h[@]}" "$u/tools/id/exporter_document/access/update" -d "{\"access_grants\":$public}" >/dev/null || return 1
+  # Compression du contexte : filtre global, réglé sur le contexte réel de chaque modèle servi (doc et dev).
+  # Même nom sur doc et dev (ex. qwen3.5-4b en 8k et 32k) : le plus petit, sûr quel que soit le serveur qui répond.
+  local fn ctx_json="{}" r n l a c x
+  for r in doc dev; do
+    n="HIBOU_PROFIL_${r^^}"; profil "$r" "${!n}"
+    for l in "${MODELES_ROLE[@]}"; do IFS='|' read -r a _ _ c x <<< "$l"; servi "$x" && [[ "$x" != *--embedding* ]] && ctx_json=$(jq -c --arg a "$a" --argjson c "$c" '.[$a] = ([.[$a] // $c, $c] | min)' <<< "$ctx_json"); done
+  done
+  # Modèles de base enregistrés et ouverts à tous : sans eux, Open WebUI 0.13 refuse aux comptes non administrateurs
+  # tout modèle Hibou construit dessus (« Model not found », raison base_model_unregistered).
+  for a in $(jq -r 'keys[] | select(. != "fim")' <<< "$ctx_json"); do
+    jq -nc --arg i "$a" '{id:$i,name:$i,base_model_id:null,meta:{},params:{},is_active:true}' | modele_owui || return 1
+  done
+  fn=$(jq -n --rawfile c "$1/amorces/open-webui/compression_contexte.py" \
+    '{id:"compression_contexte",name:"Compression du contexte",content:$c,meta:{description:"Résume les anciens échanges quand une conversation approche de la limite du modèle."}}')
+  curl -fsS "${h[@]}" "$u/functions/create" -d "$fn" >/dev/null 2>&1 \
+    || curl -fsS "${h[@]}" "$u/functions/id/compression_contexte/update" -d "$fn" >/dev/null || return 1
+  jq -nc --arg c "$ctx_json" '{contextes:$c, seuil:0.5, garder:4}' | curl -fsS "${h[@]}" "$u/functions/id/compression_contexte/valves/update" -d @- >/dev/null || return 1
+  local etat; etat=$(curl -fsS "${h[@]}" "$u/functions/id/compression_contexte")
+  [[ "$(jq -r .is_active <<< "$etat")" == true ]] || curl -fsS "${h[@]}" -X POST "$u/functions/id/compression_contexte/toggle" >/dev/null || return 1
+  [[ "$(jq -r .is_global <<< "$etat")" == true ]] || curl -fsS "${h[@]}" -X POST "$u/functions/id/compression_contexte/toggle/global" >/dev/null || return 1
   if [[ -n "$2" ]]; then   # installation : jeton de hibou-redac (en mise à jour, les valves déjà en place sont gardées)
   jq -nc --arg f "https://forge.$DOMAINE" --arg j "$2" '{forgejo_url:$f,depot:"hibou/hibou-docs",jeton:$j}' \
     | curl -fsS "${h[@]}" "$u/tools/id/publier_forgejo/valves/update" -d @- >/dev/null || return 1
@@ -2950,6 +2998,7 @@ amorcer_open_webui() {  # bundle jeton_redac
   local kb f fid
   kb=$(curl -fsS "${h[@]}" "$u/knowledge/" | jq -c '(.items? // .)[] | select(.name=="Hibou · Templates")' | head -1)
   [[ -n "$kb" ]] || kb=$(curl -fsS "${h[@]}" "$u/knowledge/create" -d '{"name":"Hibou · Templates","description":"Templates de hibou-docs"}')
+  curl -fsS "${h[@]}" "$u/knowledge/$(jq -r .id <<< "$kb")/access/update" -d "{\"access_grants\":$public}" >/dev/null || return 1
   # Remplie tant qu’elle est vide : à la première installation de forge, les embeddings (VM doc) n’existent pas encore.
   # GET /knowledge/{id} ne liste plus ses fichiers : on compte par /files (champ total).
   if [[ "$(curl -fsS "${h[@]}" "$u/knowledge/$(jq -r .id <<< "$kb")/files" | jq '.total // 0')" == 0 ]]; then
@@ -2964,6 +3013,7 @@ amorcer_open_webui() {  # bundle jeton_redac
   local kbdoc cle_owui
   kbdoc=$(curl -fsS "${h[@]}" "$u/knowledge/" | jq -c '(.items? // .)[] | select(.name=="Hibou · Documentation")' | head -1)
   [[ -n "$kbdoc" ]] || kbdoc=$(curl -fsS "${h[@]}" "$u/knowledge/create" -d '{"name":"Hibou · Documentation","description":"Documentation validée de hibou-docs"}')
+  curl -fsS "${h[@]}" "$u/knowledge/$(jq -r .id <<< "$kbdoc")/access/update" -d "{\"access_grants\":$public}" >/dev/null || return 1
   cle_owui=$(curl -fsS "${h[@]}" -X POST "$u/auths/api_key" | jq -r '.api_key // empty')
   if [[ -n "$cle_owui" ]]; then
     api PUT /repos/hibou/hibou-docs/actions/secrets/OWUI_CLE "$(jq -nc --arg d "$cle_owui" '{data:$d}')" >/dev/null \
@@ -2977,7 +3027,7 @@ amorcer_open_webui() {  # bundle jeton_redac
   # Modèle de questions-réponses sur la documentation interne.
   jq -nc --argjson kb "$kbdoc" --arg b "$PRINCIPAL" '{id:"hibou-documentation",name:"Hibou · Documentation interne",base_model_id:$b,
     meta:{description:"Répond à partir de la documentation validée de hibou-docs, avec ses sources.",profile_image_url:"/static/hibou/symbole-sur-nuit.svg",
-      knowledge:[$kb + {type:"collection"}],capabilities:{citations:true}},
+      knowledge:[$kb + {type:"collection"}],capabilities:{citations:true},toolIds:["exporter_document"]},
     params:{system:"Tu es Hibou. Tu réponds en français, au tutoiement, calme et précis, sans point d’exclamation ni émoji. Tu réponds uniquement à partir des documents fournis et tu cites la page utilisée. Si la documentation ne contient pas la réponse, dis-le et propose de rédiger la page manquante avec un modèle Hibou de rédaction.",temperature:0.2},
     is_active:true}' | modele_owui || return 1
 
@@ -3055,8 +3105,8 @@ aide() {
 
   ${GRAS}${BRUME}Rôles${FIN}
     forge   Sur un nœud du cluster : VM des applications (Forgejo, Open WebUI, OpenCode, supervision).
-    doc     Sur le R730 doc : VM avec les cartes en passthrough, LLM de rédaction, vision, images.
-    dev     Sur le R730 dev : VM avec les cartes en passthrough, LLM de code.
+    doc     Sur l’hôte des cartes doc : VM avec les cartes en passthrough, LLM de rédaction, vision, images.
+    dev     Sur l’hôte des cartes dev : VM avec les cartes en passthrough, LLM de code.
     noeud   Sur les autres nœuds du cluster : supervision de l’hôte seulement.
 
   ${GRAS}${BRUME}Options${FIN}

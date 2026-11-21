@@ -243,6 +243,7 @@ L’utilisateur te donne un sujet, et parfois des notes, des captures ou des doc
 - garde toutes les sections `##`, dans le même ordre et avec les mêmes intitulés ;
 - remplace chaque consigne en commentaire `<!-- -->` par le contenu ; n’en laisse aucune ;
 - pour un schéma, utilise un bloc ```mermaid valide ;
+- si la personne demande un fichier (Word, PDF, PowerPoint, Excel), appelle l’outil exporter_document avec le document complet en Markdown et le format voulu ;
 - blocs de code : une ligne vide avant et après, et le langage indiqué (```bash, ```text) ; adresses entre chevrons <https://…> ou dans du code ;
 - n’invente ni commande, ni version, ni chiffre : si une information manque, écris « À compléter : » suivi de ce qu’il faut fournir.
 
@@ -261,7 +262,7 @@ for tid, titre, public, _ in TEMPLATES:
         "base_model_id": "gemma-4-26b",
         "meta": {"description": f"Rédige un document « {titre} » pour les {public}, à partir d’un sujet.",
                  "profile_image_url": "/static/hibou/symbole-sur-nuit.svg",
-                 "toolIds": ["publier_forgejo"],
+                 "toolIds": ["publier_forgejo", "exporter_document"],
                  "capabilities": {"vision": True, "citations": True}},
         "params": {"system": CONSIGNE.format(titre=titre, template=tpl), "temperature": 0.4},
         "is_active": True,
@@ -273,7 +274,7 @@ ecrire("open-webui/publier_forgejo.py", '''
 """
 title: Publier dans Forgejo
 author: Hibou
-version: 0.2.0
+version: 0.3.0
 description: Dépose un document Markdown dans hibou-docs, sur une branche, et ouvre une pull request.
 """
 import base64, datetime, re
@@ -340,16 +341,20 @@ class Tools:
         contenu = normaliser(contenu)
         if not contenu.startswith("---"):
             return "Le document doit commencer par son en-tête YAML (modele, titre)."
-        auteur = (__user__ or {}).get("name", "inconnu")
-        branche = "redaction/" + re.sub(r"[^a-z0-9-]", "-", chemin[5:-3]) + datetime.datetime.now().strftime("-%Y%m%d%H%M")
+        auteur = (__user__ or {}).get("name") or "inconnu"
+        courriel = (__user__ or {}).get("email") or ""
+        # Une branche par personne (redaction/<personne>/…) ; le site docs montre tout ce qui est fusionné dans main.
+        personne = re.sub(r"[^a-z0-9-]", "-", (courriel.split("@")[0] or auteur).lower()).strip("-") or "inconnu"
+        branche = f"redaction/{personne}/" + re.sub(r"[^a-z0-9-]", "-", chemin[5:-3]) + datetime.datetime.now().strftime("-%Y%m%d%H%M")
         try:
             self._api("POST", "/branches", json={"new_branch_name": branche, "old_branch_name": "main"})
             self._api("POST", f"/contents/{chemin}", json={
                 "branch": branche, "message": f"Rédaction : {titre}",
+                **({"author": {"name": auteur, "email": courriel}} if courriel else {}),
                 "content": base64.b64encode(contenu.encode()).decode()})
             pr = self._api("POST", "/pulls", json={
                 "head": branche, "base": "main", "title": titre,
-                "body": f"Document rédigé avec Hibou pour {auteur}. Le runner vérifie le style, les sections et les schémas."})
+                "body": f"Demandé par {auteur}" + (f" ({courriel})" if courriel else "") + ", rédigé avec Hibou. Le runner vérifie le style, les sections et les schémas."})
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 422:
                 return "Ce fichier existe déjà sur main. Choisis un autre chemin, ou modifie-le dans Forgejo."

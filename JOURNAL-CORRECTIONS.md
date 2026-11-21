@@ -297,6 +297,56 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
   Dans l'instance d'alice : commit `alice <alice@hibou.lan>`, committer `hibou-dev`, PR « Demandé par @alice ». **Prouvé.**
 - Mémoire : ~350 Mo par instance sur forge.
 
+## Étape 1 (dev) — essais réels, 2026-11-21 après-midi
+- **Refus de `rm -rf .git`** par le vrai agent (instance d'alice) : 3 tentatives, 3 refus d'OpenCode (« The user has specified a rule which prevents you… »). **Prouvé.**
+- **pip et npm par le miroir** dans l'agent : `npm install` réussit après que l'agent a corrigé une version inventée (`^4.0.0` alors que le miroir a 7.0.0) ;
+  `pip install pytest` échoue (pytest absent du miroir, invisible dans un `.venv` isolé) : 25 min de boucle.
+  Diff (consignes) : `python3 -m venv --system-site-packages .venv` ; installer sans numéro de version.
+- **Relecteur sur une PR de documentation** (PR de documentation, dev en marche) : avis posté, 10 remarques au plus (B24), surtout génériques : limite du 4B.
+- **Runner** : refuse la PR n° 8 (sections « Objet » et « Retour arrière » manquantes dans le document d'essai écrit à la main) ; corrigé sur la branche → succès.
+- **Fusion** : non faite par Claude (le contrôle humain est voulu : le classifieur de sécurité a refusé l'approbation et la fusion automatiques). À faire par une personne.
+
+## Étape 2 (doc) — priorité
+- Test sur le serveur doc : bob n° 1 (0 s), bob n° 2 (0,5 s), alice n° 3 (1,5 s), 400 tokens chacune.
+  Fins : bob n° 1 à 34 s (jamais interrompue), **alice à 51,5 s**, bob n° 2 à 69 s. Journal de `priorite` : « alice (rang 0) attend… », métriques
+  `hibou_llm_requetes_total` (alice 1, bob 2), `hibou_llm_attente_secondes_total` (alice 32 s, bob 51 s), `hibou_llm_contexte_max` 8192. **Prouvé.**
+
+## B31 — Open WebUI : aucun compte non administrateur ne peut utiliser les modèles Hibou (bloquant)
+- Symptôme : alice (rôle user, connectée par Forgejo) : `POST /api/chat/completions` → 400 `Model not found` ; d'abord aucun modèle visible.
+- Cause : Open WebUI 0.13 réserve à l'administrateur toute ressource sans autorisation (`access_grant`) ; il refuse aussi un modèle dont le modèle de base n'est pas enregistré
+  (journal : `reason=base_model_unregistered`). L'essai précédent passait par le compte administrateur, d'où un défaut resté invisible.
+- Diff (`amorcer_open_webui`) : lecture publique (`principal_id: "*"`) sur les modèles Hibou (`/models/model/access/update`, la mise à jour ignore `access_grants`),
+  les outils (`/tools/id/<id>/access/update`) et les deux bases (`/knowledge/<id>/access/update`) ; modèles de base de chat servis par doc et dev enregistrés et ouverts.
+- Test : `mettre-a-jour forge` n° 35 : `access_grant` public sur 7 modèles, 2 outils, 2 bases ; alice voit `qwen3.5-4b` et les 6 modèles Hibou et obtient une réponse. **Prouvé.**
+
+## B32 — Export de documents téléchargeables dans le chat (demande de l'utilisateur)
+- Outil `exporter_document` (amorce `open-webui/exporter_document.py`) : Markdown → `.docx` (python-docx), `.pdf` (fpdf2, polices DejaVu, bandeau ambre, titres ardoise),
+  `.pptx` (python-pptx), `.xlsx` (openpyxl, tableaux Markdown), `.md`. Le fichier est enregistré au nom de la personne (`Files.insert_new_file`) et attaché au message (événement `files`).
+- python-docx, python-pptx et openpyxl sont dans l'image d'Open WebUI ; **pandoc y est aussi mais plante (segfault) sur le processeur d'essai** sans AVX2 : non utilisé.
+  fpdf2 2.9.0, fonttools, defusedxml : téléchargés par le pip de l'image Open WebUI (`telecharger`, dossier `owui-py/` du bundle, `versions.lock` : `owui-py`),
+  décompressés dans `/srv/hibou/owui-py`, montés en lecture seule sur `/app/hibou-py`.
+- Modèles Hibou et « Documentation interne » : outil ajouté, consigne « si la personne demande un fichier… appelle exporter_document ».
+- Test : conversions dans le conteneur (docx 37 Ko, pdf 26 Ko, pptx 30 Ko, xlsx 5 Ko ; PDF relu : accents, gras, listes numérotées, tableau, code).
+  Page de chat en alice (`hibou-procedure`, « rédige… puis exporte-la en PDF ») : fichier attaché en 53 s, téléchargé par alice (29 Ko, `%PDF-1.3`), propriétaire alice ;
+  **bob : 404** sur le même fichier. Nom sans accents translittérés corrigé (`redemarrage-…`). **Prouvé.**
+- Pistes : thème de document PowerPoint aux couleurs Hibou ; export `.odt` quand pandoc fonctionnera (R730 avec AVX2, à vérifier).
+
+## B33 — Compression du contexte dans le chat (doc)
+- Constat (mesure directe) : au-delà du contexte, llama-server refuse (`exceed_context_size_error`) ; Open WebUI ne compresse rien.
+- Diff : filtre global `compression_contexte` (amorce `open-webui/compression_contexte.py`) : au-delà de la moitié du contexte du modèle (le reste pour les extraits de la base),
+  résume les anciens échanges par le modèle lui-même, par morceaux, garde les derniers messages tels quels (au moins 4), place le résumé dans le message système
+  (Qwen refuse un second message système), annonce « je résume N anciens messages » ; si le résumé échoue, retire les plus anciens. Résumé gardé en mémoire par conversation.
+  Contextes réglés par le script d'après les profils (le plus petit si doc et dev servent le même nom : `qwen3.5-4b` 8192 et non 32768).
+- Test : page de chat en alice, 40 messages (34 356 caractères, ~10 400 tokens, qui donnaient 400 sans filtre) + « quel est le code donné au début ? » :
+  « je résume 31 anciens messages », résumé en 51 s, réponse **« 4721 »** juste en 66 s. **Prouvé.**
+- Pour 4 × Quadro RTX 4000 (32 Go, profil doc ≥ 24 Go : Gemma 4 26B 64k ou Qwen3.8 27B 32k), le seuil tombe à 32k ou 16k tokens d'historique.
+
+## B34 — doc : un espace par personne
+- Conversations et fichiers : déjà propres à chaque compte dans Open WebUI (fichier d'alice : 404 pour bob, B32).
+- Publication (`publier_forgejo` 0.3.0) : branche `redaction/<personne>/<chemin>-<date>`, commit au nom de la personne, PR « Demandé par <nom> (<courriel>) ».
+  `docs.hibou.lan` publie tout ce qui est fusionné dans `main` (inchangé).
+- Test : PR hibou-docs n° 8 : branche `redaction/alice/procedures-verifier-sauvegarde-forge-…`, commit `alice <alice@hibou.lan>`, corps « Demandé par alice (alice@hibou.lan) ». **Prouvé.**
+
 ## Constats sur les agents (doc et dev), profil ≥ 4 Go
 - Où vont les fichiers : **dev** (OpenCode, conteneur sur forge) écrit dans `/workspace/<projet>` = `/srv/workspace/<projet>` de la VM forge (uid 1000), un clone par projet.
   **doc** (Open WebUI) n'écrit aucun fichier : l'outil dépose le document par l'API de Forgejo, directement dans hibou-docs (`docs/<dossier>/<nom>.md`).

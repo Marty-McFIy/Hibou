@@ -27,7 +27,9 @@ def envoyer(nom, contenu):
     borne = uuid.uuid4().hex
     corps = (f"--{borne}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{nom}\"\r\n"
              f"Content-Type: text/markdown\r\n\r\n").encode() + contenu + f"\r\n--{borne}--\r\n".encode()
-    return appel("POST", "/files/", corps, f"multipart/form-data; boundary={borne}")["id"]
+    # Extraction du texte avant la réponse : en arrière-plan, l’ajout à la base qui suit arrive avant elle
+    # et Open WebUI le refuse (« The content provided is empty »).
+    return appel("POST", "/files/?process_in_background=false", corps, f"multipart/form-data; boundary={borne}")["id"]
 
 
 def main(dossier):

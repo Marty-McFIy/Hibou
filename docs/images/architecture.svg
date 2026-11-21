@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" role="img" aria-labelledby="titre desc">
+  <title id="titre">Architecture de Hibou</title>
+  <desc id="desc">Une machine connectée prépare un bundle vérifié ; dans le réseau isolé, la VM forge sert les applications et interroge les VM doc et dev, qui portent les cartes NVIDIA.</desc>
+  <defs>
+    <marker id="fleche" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#F2B544"/>
+    </marker>
+    <marker id="fleche-pierre" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8A93A6"/>
+    </marker>
+    <style>
+      .titre { font: 600 22px Georgia, 'Fraunces', serif; fill: #E9E4D8; }
+      .bloc { font: 600 16px Inter, 'Segoe UI', Roboto, sans-serif; fill: #E9E4D8; }
+      .texte { font: 14px Inter, 'Segoe UI', Roboto, sans-serif; fill: #E9E4D8; }
+      .doux { font: 13px Inter, 'Segoe UI', Roboto, sans-serif; fill: #8A93A6; }
+      .ambre { font: 600 13px Inter, 'Segoe UI', Roboto, sans-serif; fill: #F2B544; letter-spacing: .06em; }
+      .mono { font: 13px 'JetBrains Mono', Consolas, monospace; fill: #F2B544; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="640" rx="18" fill="#0F1420"/>
+  <text x="40" y="52" class="titre">Hibou · deux IA locales en réseau isolé</text>
+
+  <!-- Machine connectée -->
+  <rect x="40" y="96" width="250" height="250" rx="12" fill="#171E2D" stroke="#2F3B52"/>
+  <text x="60" y="126" class="ambre">MACHINE CONNECTÉE</text>
+  <text x="60" y="160" class="mono">hibou telecharger</text>
+  <text x="60" y="190" class="texte">Paquets, images Docker,</text>
+  <text x="60" y="210" class="texte">modèles, miroir pip et npm</text>
+  <rect x="60" y="232" width="210" height="88" rx="10" fill="#0A0E17" stroke="#F2B544"/>
+  <text x="76" y="260" class="bloc">Bundle</text>
+  <text x="76" y="282" class="doux">SHA-256, versions figées,</text>
+  <text x="76" y="300" class="doux">secrets chiffrés</text>
+  <path d="M290 276 C 330 276, 330 276, 368 276" stroke="#F2B544" stroke-width="2" fill="none" stroke-dasharray="6 5" marker-end="url(#fleche)"/>
+  <text x="300" y="262" class="doux">disque</text>
+
+  <!-- Réseau isolé -->
+  <rect x="376" y="80" width="784" height="520" rx="14" fill="none" stroke="#2F3B52" stroke-dasharray="4 6"/>
+  <text x="396" y="108" class="ambre">RÉSEAU ISOLÉ · AUCUNE SORTIE · PROXMOX VE</text>
+
+  <!-- Personnes -->
+  <rect x="396" y="128" width="340" height="56" rx="10" fill="#171E2D" stroke="#2F3B52"/>
+  <text x="414" y="152" class="bloc">Navigateurs, éditeurs</text>
+  <text x="414" y="172" class="doux">connexion unique par Forgejo</text>
+  <path d="M566 184 L566 216" stroke="#8A93A6" stroke-width="2" marker-end="url(#fleche-pierre)"/>
+
+  <!-- VM forge -->
+  <rect x="396" y="220" width="340" height="360" rx="12" fill="#171E2D" stroke="#F2B544"/>
+  <text x="414" y="248" class="ambre">VM FORGE</text>
+  <text x="414" y="276" class="mono">Caddy :443 · TLS interne</text>
+  <g class="texte">
+    <text x="414" y="310">Forgejo</text><text x="560" y="310" class="doux">dépôts, paquets, Actions</text>
+    <text x="414" y="340">Open WebUI</text><text x="560" y="340" class="doux">chat, rédaction, export</text>
+    <text x="414" y="370">OpenCode × N</text><text x="560" y="370" class="doux">un par développeur</text>
+    <text x="414" y="400">Relecteur</text><text x="560" y="400" class="doux">avis sur chaque PR</text>
+    <text x="414" y="430">Runner, site docs</text><text x="560" y="430" class="doux">contrôle, publication</text>
+    <text x="414" y="460">Supervision</text><text x="560" y="460" class="doux">Grafana, alertes, état</text>
+  </g>
+  <line x1="414" y1="484" x2="718" y2="484" stroke="#2F3B52"/>
+  <text x="414" y="510" class="doux">DNS et heure du réseau, miroir pip, npm,</text>
+  <text x="414" y="530" class="doux">git et images, évaluation hebdomadaire,</text>
+  <text x="414" y="550" class="doux">sauvegarde nocturne (vzdump)</text>
+
+  <!-- VM doc -->
+  <rect x="820" y="128" width="320" height="200" rx="12" fill="#171E2D" stroke="#2F3B52"/>
+  <text x="838" y="156" class="ambre">VM DOC · CARTES NVIDIA</text>
+  <text x="838" y="188" class="mono">file de priorité :8080</text>
+  <text x="838" y="220" class="texte">llama-swap, llama.cpp</text>
+  <text x="838" y="246" class="doux">rédaction, vision,</text>
+  <text x="838" y="266" class="doux">recherche (embeddings)</text>
+  <text x="838" y="300" class="doux">images (ComfyUI, option)</text>
+
+  <!-- VM dev -->
+  <rect x="820" y="372" width="320" height="208" rx="12" fill="#171E2D" stroke="#2F3B52"/>
+  <text x="838" y="400" class="ambre">VM DEV · CARTES NVIDIA</text>
+  <text x="838" y="432" class="mono">file de priorité :8080</text>
+  <text x="838" y="464" class="texte">llama-swap, llama.cpp</text>
+  <text x="838" y="490" class="doux">agent de code, relecture,</text>
+  <text x="838" y="510" class="doux">autocomplétion (FIM)</text>
+  <text x="838" y="544" class="doux">décodage spéculatif (option)</text>
+
+  <!-- Liens forge vers doc et dev -->
+  <path d="M736 340 C 780 340, 780 228, 818 228" stroke="#F2B544" stroke-width="2" fill="none" marker-end="url(#fleche)"/>
+  <path d="M736 380 C 780 380, 780 476, 818 476" stroke="#F2B544" stroke-width="2" fill="none" marker-end="url(#fleche)"/>
+  <text x="744" y="528" class="doux" style="font-size:12px">API, une clé</text>
+  <text x="744" y="545" class="doux" style="font-size:12px">par personne</text>
+</svg>

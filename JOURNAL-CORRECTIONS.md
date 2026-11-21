@@ -347,6 +347,58 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
   `docs.hibou.lan` publie tout ce qui est fusionné dans `main` (inchangé).
 - Test : PR hibou-docs n° 8 : branche `redaction/alice/procedures-verifier-sauvegarde-forge-…`, commit `alice <alice@hibou.lan>`, corps « Demandé par alice (alice@hibou.lan) ». **Prouvé.**
 
+## Chaîne documentaire complète (PR hibou-docs n° 8, fusion autorisée par l'utilisateur)
+- Fusion sans approbation : 405 (protection) ; approbation par hibou-admin puis fusion : 200. Runner sur main : site construit et publié
+  (`/srv/docs-site/procedures/verifier-sauvegarde-forge/`, titre « Vérifier la sauvegarde nocturne de forge - Hibou · Documentation »), synchronisation du chat en échec (B35).
+- Après B35 : « Documentation interne », interrogé par alice (« Comment vérifier que la sauvegarde nocturne de forge a réussi ? ») répond en 24 s à partir de la page, source [1]. **Prouvé.**
+
+## B35 — Base « Hibou · Documentation » : synchronisation en échec et documents validés écrasés à chaque mise à jour
+- Symptômes : runner après fusion : `HTTP Error 400` sur `/knowledge/<id>/file/add` (`DUPLICATE_CONTENT`) ; après correction, `The content provided is empty` sur la 2e page.
+  Et à chaque `mettre-a-jour forge`, la base était remplie avec les documents **de départ** du bundle, pas avec ceux fusionnés.
+- Causes : (1) `hibou-docs` garde les outils amorcés à l'installation (version d'avant B16), rien ne les met à jour ;
+  (2) Open WebUI extrait le texte d'un fichier en arrière-plan : ajouté à la base 50 ms après l'envoi, il est encore vide ;
+  (3) `amorcer_open_webui` synchronisait `amorces/hibou-docs`.
+- Diff : synchronisation depuis un clone de `main` de hibou-docs avec l'outil du bundle ; envoi `?process_in_background=false` (synchronisation et templates) ;
+  `outils_par_pr` : outils, workflow et gabarits du bundle proposés par **pull request** (`hibou/outils-<version>`, branche mise à jour si la PR est ouverte), jamais poussés sur main.
+- Test : `mettre-a-jour forge` n° 38 : « Documentation fusionnée envoyée au chat (2 pages) », « pull request des outils 0.9.0 mise à jour » (PR n° 9, à fusionner par une personne). **Prouvé.**
+
+## Phase 6.1 — Mise à jour d'une seule image (`HIBOU_ACTUALISER=caddy`)
+- `telecharger` (5 min 29 s) : Caddy revérifié, empreinte publiée inchangée (`caddy:2`), donc 18 images « inchangée », `versions.lock` identique pour Caddy.
+- `mettre-a-jour forge` n° 39 : « 0 image(s) chargée(s) » ; `secrets.env`, `opencode.env`, `priorite.json` identiques (empreintes), mêmes 6 comptes, même client OIDC Proxmox.
+- Constat : tous les conteneurs de forge sont recréés à chaque mise à jour (`--force-recreate`, nécessaire pour les fichiers montés remplacés) : coupure de quelques secondes de tous les services, pas seulement du service changé.
+
+## B36 — Connexion à Proxmox par Forgejo impossible (hôte sans DNS vers forge, émetteur OIDC différent)
+- Symptômes : `POST /access/openid/auth-url` → 500 `failed to lookup address information` ; puis `unexpected issuer URI https://forge.hibou.lan (expected https://forge.hibou.lan/)`.
+- Causes : l'hôte Proxmox ne résout pas `forge.<domaine>` (son DNS n'est pas forge) ; le domaine est créé avec `--issuer-url https://forge.<domaine>/`, Forgejo annonce l'émetteur sans barre finale.
+  `realm_proxmox` n'était pas rejoué en mise à jour.
+- Diff : `realm_proxmox` ajoute `forge.<domaine>` à `/etc/hosts` si l'hôte ne le résout pas ; émetteur sans barre finale (et dans `hibou-acces.txt`) ; `realm_proxmox` rejoué en mise à jour (idempotent).
+- Test : `mettre-a-jour forge` n° 40 et 41 (entrée ajoutée une fois, non dupliquée) ; connexion complète simulée comme un navigateur (auth-url, formulaire Forgejo, consentement, retour
+  `https://pve-doc.hibou.lan:8006` avec le code, `/access/openid/login`) : **ticket obtenu pour `hibou-admin@forgejo`**, droits d'administration. **Prouvé.**
+
+## B37 — Changement de profil : Open WebUI ne suit pas (Phase 6.2)
+- Essai : « Changer seulement les cartes et les modèles », doc de `doc:4` (4B) à `doc:3` (9B) : `telecharger` 6 min 39 s, « retiré : doc · qwen3.5-4b », 9B téléchargé (5,6 Go), comptes et clés inchangés ;
+  `mettre-a-jour doc` : ancien modèle retiré de la copie du bundle et de `/srv/models`, llama-swap sur le 9B. Mais Open WebUI : modèles Hibou toujours sur `qwen3.5-4b`, filtre sur l'ancien contexte, évaluation sur l'ancienne configuration.
+- Cause : `mettre-a-jour doc` ne touche pas forge.
+- Diff : phase `owui` du rôle forge (rebranche Open WebUI, copie `config.env` pour l'évaluation) ; doc et dev la lancent en fin d'installation ou de mise à jour, après avoir recopié script, configuration et amorces sur forge.
+  Effet de bord utile : la base de templates se remplit dès l'installation de doc (plus besoin de relancer `mettre-a-jour forge`, cf. B8).
+- Test : `mettre-a-jour doc` : « J'ai terminé le rôle forge (phase owui) », modèles Hibou sur `qwen3.5-9b`, contextes du filtre à jour, `PROFIL_DOC=3` dans la configuration de l'évaluation. **Prouvé.**
+  Retour à `doc:4` : « retiré : doc · qwen3.5-9b » (6 min 12 s), `mettre-a-jour doc` : 4B servi, Open WebUI rebranché sur `qwen3.5-4b` automatiquement. **Prouvé dans les deux sens.**
+
+## Phase 6.3 — Sauvegarde ; B38 — une sauvegarde manuelle ne met pas la métrique à jour
+- `vzdump 210 --storage hibou-sauvegardes --mode snapshot` : `fs-freeze` puis `fs-thaw` par l'agent invité, 80 Gio lus en 135 s, archive 24 Go (sans compression : défaut de vzdump), 2 min 17 s.
+  Avec `--compress zstd` : 14,5 Go, 2 min 40 s. La tâche planifiée de 3 h a bien tourné la nuit précédente (métrique à 03:02).
+- B38 : la métrique `hibou_sauvegarde_derniere_reussite_timestamp` ne bouge pas après une sauvegarde manuelle : le crochet n'est attaché qu'à la tâche planifiée ;
+  et la configuration de sauvegarde n'était pas rejouée en mise à jour.
+  Diff : fonction `sauvegarde_forge` (tâche, crochet) rejouée en mise à jour de forge ; crochet limité à la VM forge (sinon une autre VM sauvegardée une fois déclencherait l'alerte « plus de 26 h ») ;
+  `script:` global dans `/etc/vzdump.conf` de l'hôte s'il n'y en a pas déjà un (sinon note, rien n'est écrasé).
+  Test : `mettre-a-jour forge` n° 42, puis `vzdump 210 … --compress zstd` : fichier de métrique à l'heure exacte de la fin, relevé par Prometheus (`job noeuds`). **Prouvé.**
+
+## Phase 6.4 — Restauration
+- `qmrestore` de l'archive zstd vers la VM 299 (`--unique 1`, stockage des VM) : 7 min 41 s ; renommée `hibou-restauration`, `onboot 0`, carte réseau coupée (`link_down=1`, même adresse que forge).
+- Démarrée : agent invité prêt en 20 s, 14 conteneurs relancés ; Forgejo `/api/healthz` 200, Open WebUI `{"status":true}` ;
+  6 comptes, 4 dépôts, `main` de hibou-docs avec la fusion de la PR n° 8 ; Open WebUI : 3 utilisateurs, 10 modèles, 11 conversations, 40 fichiers, 2 bases, 2 outils, 1 filtre ;
+  espace OpenCode d'alice présent. Puis arrêtée et supprimée (`qm destroy 299 --purge`). **Prouvé.**
+
 ## Constats sur les agents (doc et dev), profil ≥ 4 Go
 - Où vont les fichiers : **dev** (OpenCode, conteneur sur forge) écrit dans `/workspace/<projet>` = `/srv/workspace/<projet>` de la VM forge (uid 1000), un clone par projet.
   **doc** (Open WebUI) n'écrit aucun fichier : l'outil dépose le document par l'API de Forgejo, directement dans hibou-docs (`docs/<dossier>/<nom>.md`).

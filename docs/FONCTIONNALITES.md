@@ -26,7 +26,8 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Installation sans question | `hibou installer forge|doc|dev|noeud` : VM créée par cloud-init, bundle copié, tout installé et vérifié | Validé |
 | Passthrough des cartes | Cartes confiées à `vfio-pci` sans redémarrer l’hôte, ajoutées à la VM, vérifiées par `nvidia-smi` | Validé (1 carte) |
 | Hôte partagé | `HIBOU_RAM_GPU`, `HIBOU_CPU_GPU` : mémoire et fils de la VM GPU | Validé |
-| Mise à jour | `hibou mettre-a-jour <rôle>` : n’apporte que ce qui a changé, garde comptes, conversations et dépôts, s’arrête si un service redémarre en boucle | Validé |
+| Mise à jour | `hibou mettre-a-jour <rôle>` : n’apporte que ce qui a changé, garde comptes, secrets, conversations et dépôts, s’arrête si un service redémarre en boucle | Validé |
+| Changement de profil | « Changer seulement les cartes et les modèles » : ancien modèle retiré du bundle et de la VM, chat et évaluation rebranchés automatiquement | Validé (4B → 9B → 4B) |
 | Pare-feu | Les ports des serveurs GPU ne s’ouvrent qu’à forge (nftables) | Validé |
 | Réseau isolé | DNS et heure servis par forge, autorité de certification interne, TLS partout | Validé |
 | Supervision des autres nœuds | `hibou installer noeud` | À valider |
@@ -77,8 +78,8 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Relecteur automatique | Chaque pull request reçoit un avis consultatif du LLM de dev ; s’il est indisponible, la PR le dit | Validé |
 | Contrôle des documents | Runner Forgejo Actions : style Markdown, sections du modèle, schémas Mermaid | Validé |
 | Fusion humaine | Une approbation requise, push direct sur `main` refusé | Validé |
-| Site de documentation | `docs.<domaine>` (MkDocs, charte Hibou), reconstruit à chaque fusion ; tout ce qui est fusionné y apparaît | À valider (fusion à faire par une personne) |
-| Base de connaissances à jour | Chaque fusion met à jour « Hibou · Documentation » dans le chat | À valider (idem) |
+| Site de documentation | `docs.<domaine>` (MkDocs, charte Hibou), reconstruit à chaque fusion ; tout ce qui est fusionné y apparaît | Validé |
+| Base de connaissances à jour | Chaque fusion, et chaque mise à jour de forge, remet « Hibou · Documentation » à l’image de `main` ; les nouveaux outils arrivent par pull request | Validé |
 | Paquets | Registres pip, npm et conteneurs de Forgejo, remplis par le miroir | Validé |
 
 ## 7. Supervision, évaluation, sauvegardes
@@ -88,12 +89,11 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Grafana | « Vue d’ensemble », « LLM en direct » (file, contexte utilisé, tokens/s), « Évaluation » ; connexion par Forgejo | Validé (tableaux en place, connexion non essayée) |
 | Alertes | Prometheus, Alertmanager, notifications ntfy (`alertes.<domaine>`), page d’état Uptime Kuma (`etat.<domaine>`) | Validé (en place) |
 | Évaluation des modèles | `hibou-eval` chaque dimanche : code, rédaction, vision ; scores dans Grafana ; une erreur d’API compte 0 | Validé |
-| Sauvegardes | vzdump de forge chaque nuit (7 jours, 4 semaines) et export Forgejo | Tâche en place, restauration à valider |
-| Connexion à Proxmox par Forgejo | Domaine OpenID `forgejo`, administrateur Hibou administrateur de Proxmox | Validé |
+| Sauvegardes | vzdump de forge chaque nuit (7 jours, 4 semaines) et export Forgejo ; une sauvegarde manuelle compte aussi | Validé (restauration complète, données intactes) |
+| Connexion à Proxmox par Forgejo | Domaine OpenID `forgejo`, administrateur Hibou administrateur de Proxmox | Validé (connexion complète) |
 
 ## 8. Ce qui reste à faire
 
 - Valider sur du vrai matériel les profils au-delà de 4 Go, le décodage spéculatif et la génération d’images.
-- Valider la restauration d’une sauvegarde de forge et le changement de profil en mise à jour.
 - Contrôler toute l’interface contre la charte (captures PC et téléphone).
 - Mesurer les durées sur disques SSD et le passage à plusieurs cartes.

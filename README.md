@@ -1,107 +1,129 @@
-<pre>
-   /\_/\
-  ( o o )   Hibou
-   > ^ <    L’IA qui veille chez vous.
-</pre>
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="charte/assets/Logos/hibou-symbole-sur-nuit.svg">
+    <img src="charte/assets/Logos/hibou-symbole-sur-brume.svg" width="112" alt="">
+  </picture>
+  <h1>HIBOU</h1>
+  <p><strong>Deux IA locales, documentation et développement, installées d’un seul script dans un réseau sans Internet.</strong></p>
+  <p>
+    <a href="docs/notes-de-version/v0.9.0.md"><img src="https://img.shields.io/badge/version-0.9.0-F2B544" alt="Version 0.9.0"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-2F3B52" alt="Licence MIT"></a>
+    <img src="https://img.shields.io/badge/Proxmox%20VE-9-0F1420" alt="Proxmox VE 9">
+    <img src="https://img.shields.io/badge/Ubuntu-26.04-0F1420" alt="Ubuntu 26.04">
+    <img src="https://img.shields.io/badge/GPU-4%20%C3%A0%2096%20Go-5CC8B8" alt="De 4 à 96 Go de mémoire vidéo">
+    <img src="https://img.shields.io/badge/r%C3%A9seau-hors%20ligne-8A93A6" alt="Hors ligne">
+  </p>
+</div>
 
-Hibou installe, dans un réseau sans Internet, deux IA locales : une IA de **documentation** (rédaction, vision,
-recherche dans la documentation) et une IA de **développement** (agent de code, autocomplétion, relecture),
-avec Forgejo comme dépôt commun. Un seul script Bash, `hibou`, prépare tout sur une machine connectée puis
-installe chaque rôle sur des hôtes Proxmox, sans question.
+<p align="center">
+  <img src="docs/captures/0.9.0/chat-documentation.png" width="49%" alt="Le chat répond à partir de la documentation validée, avec sa source">
+  <img src="docs/captures/0.9.0/forgejo-pull-request.png" width="49%" alt="Pull request de documentation demandée par alice, relue par le relecteur Hibou et fusionnée">
+</p>
 
-**Local.** Les modèles tournent sur tes cartes NVIDIA, servis par llama.cpp et llama-swap.
-**Isolé.** Aucune connexion sortante. Tout entre par un bundle vérifié.
-**Discret.** Il veille, il ne bavarde pas.
+## Ce que c’est
 
-## Ce que tu obtiens
+- **Une IA de documentation** (`chat.<domaine>`) : cinq rédacteurs (procédure, fiche technique, guide, architecture,
+  décision), export Word, PDF, PowerPoint et Excel dans la conversation, publication dans Forgejo par pull request,
+  réponses sourcées sur la documentation validée, compression automatique des longues conversations.
+- **Une IA de développement** (`code.<domaine>`) : une instance OpenCode par développeur, hors ligne (pip et npm par
+  le miroir), qui crée le dépôt, travaille sur une branche et ouvre la pull request ; autocomplétion pour les éditeurs.
+- **Tout autour** : Forgejo (dépôts, paquets, Actions), relecture automatique de chaque pull request, site de
+  documentation, file de priorité par personne, connexion unique, supervision, évaluation hebdomadaire des modèles,
+  sauvegarde nocturne.
 
-- **Chat et rédaction** (`chat.<domaine>`) : cinq rédacteurs (procédure, fiche technique, guide, architecture, décision),
-  export Word, PDF, PowerPoint et Excel téléchargeable dans la conversation, publication dans Forgejo par pull request,
-  questions-réponses sur la documentation validée, compression automatique des longues conversations.
-- **Agent de code** (`code.<domaine>`) : une instance OpenCode par développeur, hors ligne (pip et npm par le miroir),
-  qui crée le dépôt, travaille sur une branche et ouvre la pull request ; `main` toujours protégée.
-- **Relecture et documentation** : avis automatique sur chaque pull request, contrôle des documents par un runner,
-  fusion humaine, site `docs.<domaine>` et base de connaissances mis à jour à chaque fusion.
-- **Priorité** : une clé par personne ; quand le serveur est occupé, le mieux classé passe en premier.
-- **Exploitation** : connexion unique par Forgejo (chat, agent, supervision, Proxmox), Grafana, alertes, évaluation
-  hebdomadaire des modèles, sauvegarde nocturne, mises à jour qui n’apportent que ce qui a changé.
+> **Rien ne sort.** Les VM Hibou n’ont pas de passerelle vers Internet. Tout entre par un bundle préparé sur une
+> machine connectée, vérifié par empreintes, aux versions figées. Les IA proposent, une personne fusionne.
 
-Liste complète, avec l’état de chaque fonction à l’essai : [docs/FONCTIONNALITES.md](docs/FONCTIONNALITES.md).
+<p align="center">
+  <img src="docs/images/architecture.svg" width="100%" alt="Architecture : machine connectée, bundle, VM forge, VM doc et VM dev">
+</p>
+
+## Versions publiées
+
+| Version | Date | Contenu | Notes |
+| --- | --- | --- | --- |
+| `v0.9.0` | 21/11/2026 | Installation complète validée sur une machine réelle ; profil 4 Go, export de documents, compression du contexte, OpenCode par personne | [notes](docs/notes-de-version/v0.9.0.md) · [preuves](JOURNAL-CORRECTIONS.md) |
+| `v0.1.0` | 16/11/2026 | Script, charte, architecture | [changelog](CHANGELOG.md) |
+
+Suite prévue : validation sur serveurs multi-cartes (24 à 96 Go), génération d’images, mise aux couleurs complète du chat.
 
 ## Matériel
 
-Trois rôles, chacun dans une VM Proxmox créée par le script :
-
-| Rôle | Où | Besoin |
+| Rôle | Où | Minimum |
 | --- | --- | --- |
-| `forge` | Un nœud Proxmox (ou un cluster) | 2 cœurs, 12 Go de RAM, 80 Go de disque au minimum |
-| `doc` | Hôte avec une ou plusieurs cartes NVIDIA | Cartes en passthrough (IOMMU), 4 Go de mémoire vidéo au minimum |
-| `dev` | Hôte avec une ou plusieurs cartes NVIDIA | Idem ; peut être le même hôte que doc si chacun a ses cartes |
+| `forge` | Un nœud Proxmox (ou un cluster) | 2 cœurs, 12 Go de RAM, 80 Go de disque |
+| `doc` | Hôte avec une ou plusieurs cartes NVIDIA en passthrough | 4 Go de mémoire vidéo |
+| `dev` | Idem, cartes distinctes de celles de doc | 4 Go de mémoire vidéo |
 
 Le profil de modèles suit la mémoire vidéo du serveur (plusieurs cartes s’additionnent) :
 
 | Mémoire vidéo | dev | doc |
 | --- | --- | --- |
-| ≥ 4 Go | Qwen3.5 4B, contexte 32k | Qwen3.5 4B, vision, contexte 8k |
+| ≥ 4 Go | Qwen3.5 4B, 32k | Qwen3.5 4B, vision, 8k |
 | ≥ 12 Go | Qwen3.5 9B, 64k + complétion 1.5B | Qwen3.5 9B, 32k |
 | ≥ 24 Go | Qwen3.8 27B Q4, 64k + complétion 3B | Gemma 4 26B Q4 (64k) ou Qwen3.8 27B Q4 (32k), vision |
 | ≥ 48 Go | Qwen3-Coder-Next Q3 ou Qwen3.8 27B Q8 + complétion 7B | Gemma 4 26B Q8 ou Qwen3.8 27B Q8, 128k |
-| ≥ 90 Go | Qwen3-Coder-Next Q6 (256k) ou Qwen3.8 27B Q8, complétion 7B | — |
+| ≥ 90 Go | Qwen3-Coder-Next Q6 (256k) ou Qwen3.8 27B Q8 | — |
 
-Cartes proposées au menu : RTX PRO 6000 Blackwell, RTX 6000 Ada, L40S, RTX A6000, RTX 5000 Ada, RTX 4000 Ada,
-RTX A4000, RTX A2000 12 Go, Quadro RTX 4000, RTX A400, ou toute autre carte en indiquant sa mémoire.
-Une carte supplémentaire peut porter la génération d’images (ComfyUI).
+## Installer
 
-## Démarrage
+Sur la machine connectée (Ubuntu avec Docker), bundle sur un disque à part :
 
-Sur la machine connectée (Ubuntu, Docker), bundle sur un disque à part :
-
-```bash
-./hibou autotest
-./hibou telecharger /mnt/hibou/bundle
-./hibou verifier /mnt/hibou/bundle
+```shell
+./hibou autotest                          # cohérence des réglages
+./hibou telecharger /mnt/hibou/bundle     # questions, puis paquets, images, modèles, miroir
+./hibou verifier /mnt/hibou/bundle        # empreintes SHA-256
 ```
 
-Sur chaque hôte Proxmox, en root, disque du bundle branché :
+Sur chaque hôte Proxmox, en root, disque branché :
 
-```bash
-./hibou installer forge   # en premier
-./hibou installer doc     # sur l’hôte des cartes doc
-./hibou installer dev     # sur l’hôte des cartes dev
-./hibou installer noeud   # facultatif : supervision des autres nœuds
+```shell
+./hibou installer forge                   # en premier
+./hibou installer doc                     # hôte des cartes doc
+./hibou installer dev                     # hôte des cartes dev
+./hibou mettre-a-jour <rôle>              # plus tard : n’apporte que ce qui a changé
 ```
 
-Mise à jour : relancer `telecharger` sur le même disque, puis `./hibou mettre-a-jour <rôle>` sur chaque hôte.
-Pas à pas : [docs/installation.md](docs/installation.md). Aide-mémoire du bundle : [docs/LISEZMOI-0.9.0.md](docs/LISEZMOI-0.9.0.md).
+Pas à pas, réponses du menu et dépannage : [docs/installation.md](docs/installation.md).
 
-## Adresses
+## Organisation du dépôt
 
-| Service | Adresse |
+| Dossier | Contenu |
 | --- | --- |
-| Chat, rédaction, export de fichiers | `https://chat.<domaine>` |
-| Agent de code | `https://code.<domaine>` |
-| Documentation validée | `https://docs.<domaine>` |
-| Forgejo | `https://forge.<domaine>` |
-| Supervision, état, alertes | `https://supervision.<domaine>`, `https://etat.<domaine>`, `https://alertes.<domaine>` |
-| API (clé par utilisateur) | `https://llm-doc.<domaine>/v1`, `https://llm-dev.<domaine>/v1` |
-
-## État
-
-Version 0.9.0, validée de bout en bout sur une machine d’essai (un hôte Proxmox, une carte de 4 Go, processeur
-sans AVX2) : préparation du bundle, installation des trois rôles, chat, rédaction et publication, export de fichiers,
-agent de code, relecture, priorité, évaluation. Chaque bogue trouvé est décrit, corrigé et prouvé dans
-[JOURNAL-CORRECTIONS.md](JOURNAL-CORRECTIONS.md). Restent à valider sur du matériel plus gros : les profils au-delà
-de 4 Go, le décodage spéculatif, la génération d’images, la restauration d’une sauvegarde.
+| `hibou` | Le script : préparation, installation, mise à jour, évaluation |
+| `hibou-miroir.py` | Miroir pip, npm, git et images Docker publié dans Forgejo |
+| `amorces/` | Dépôts amorcés (`hibou-docs`, `hibou-eval`), outils, filtre et modèles d’Open WebUI |
+| `charte/` | Charte graphique : jetons, logos, icônes, polices, thèmes |
+| `docs/` | Installation, architecture, fonctionnalités, notes de version, captures |
 
 ## Documentation
 
-- [Fonctionnalités](docs/FONCTIONNALITES.md)
-- [Installation pas à pas](docs/installation.md)
-- [Architecture](docs/architecture.md)
-- [Journal des corrections](JOURNAL-CORRECTIONS.md) · [Changelog](CHANGELOG.md)
-- [Charte graphique](charte/LISEZMOI.md) : jetons, composants, logos, icônes, polices
-- [Contribuer](CONTRIBUTING.md) · [Sécurité](SECURITY.md)
+| | |
+| --- | --- |
+| **Découvrir** | [Fonctionnalités](docs/FONCTIONNALITES.md) · [Architecture](docs/architecture.md) · [Captures](docs/captures/0.9.0) |
+| **Installer** | [Installation pas à pas](docs/installation.md) · [Aide-mémoire du bundle](docs/LISEZMOI-0.9.0.md) |
+| **Versions** | [Notes 0.9.0](docs/notes-de-version/v0.9.0.md) · [Changelog](CHANGELOG.md) · [Journal des corrections](JOURNAL-CORRECTIONS.md) |
+| **Charte** | [Charte graphique](charte/LISEZMOI.md) |
+| **Contribuer** | [Contribuer](CONTRIBUTING.md) · [Sécurité](SECURITY.md) |
+
+## Sécurité
+
+- **Hors ligne** : aucune connexion sortante, bundle vérifié par SHA-256, versions figées dans `versions.lock`.
+- **Secrets** : chiffrés dans le bundle (AES-256, PBKDF2), jamais écrits dans les journaux ni affichés par les agents.
+- **Accès** : TLS par une autorité interne, connexion unique par Forgejo, ports des serveurs GPU ouverts à forge seulement.
+- **Agents** : sans droits root, `main` protégée dans tous les dépôts, fusion humaine, commandes dangereuses refusées.
+- **Pas encore fait** : authentification à deux facteurs imposée, rotation automatique des jetons.
+
+## Développement
+
+```shell
+bash -n hibou                             # syntaxe
+./hibou autotest                          # profils, images, file de priorité
+```
+
+Une correction se note dans [JOURNAL-CORRECTIONS.md](JOURNAL-CORRECTIONS.md) : symptôme, cause, diff, test qui la
+prouve. Règles complètes : [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 
-[MIT](LICENSE).
+[MIT](LICENSE), © 2026 Marty-McFIy.

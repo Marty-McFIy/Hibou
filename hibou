@@ -1323,26 +1323,7 @@ EOF
   if [[ "$2" != forge ]] && ping -c1 -W2 "$HIBOU_IP_FORGE" >/dev/null 2>&1; then
     printf 'server %s iburst\n' "$HIBOU_IP_FORGE" > /etc/chrony/sources.d/hibou.sources 2>/dev/null && systemctl restart chrony && fait "Heure prise sur forge."
   fi
-  if [[ "$2" == forge ]]; then
-    [[ -n "${HIBOU_STOCKAGE_SAUVEGARDE:-}" ]] || erreur "Aucun stockage de sauvegarde dans la configuration." "Refais le menu du bundle (« Tout refaire ») et indique un stockage Proxmox."
-    pvesm status --storage "$HIBOU_STOCKAGE_SAUVEGARDE" --content backup >/dev/null 2>&1 \
-      || erreur "Le stockage $HIBOU_STOCKAGE_SAUVEGARDE n’existe pas ou n’accepte pas les sauvegardes." "Datacenter > Storage : ajoute-le avec le contenu « VZDump backup file », puis relance."
-    install -d /var/lib/prometheus/node-exporter
-    cat > /usr/local/bin/hibou-vzdump-hook <<'EOF'
-#!/bin/sh
-# Appelé par vzdump : note l’heure de chaque sauvegarde réussie pour Prometheus.
-[ "$1" = "backup-end" ] || exit 0
-f=/var/lib/prometheus/node-exporter/hibou_vzdump_$3.prom
-echo "hibou_sauvegarde_derniere_reussite_timestamp{type=\"vzdump\",vmid=\"$3\"} $(date +%s)" > "$f.tmp" && mv "$f.tmp" "$f"
-EOF
-    chmod 755 /usr/local/bin/hibou-vzdump-hook
-    pvesh get /cluster/backup/hibou >/dev/null 2>&1 && pvesh delete /cluster/backup/hibou
-    # forge seule : les VM GPU ne contiennent que des modèles et une configuration, rejouables depuis le bundle.
-    pvesh create /cluster/backup --id hibou --schedule "03:00" --vmid "$HIBOU_VMID_FORGE" --mode snapshot --compress zstd \
-      --storage "$HIBOU_STOCKAGE_SAUVEGARDE" --prune-backups keep-daily=7,keep-weekly=4 \
-      --script /usr/local/bin/hibou-vzdump-hook --notes-template "Hibou {{guestname}}" >/dev/null
-    fait "Sauvegarde quotidienne à 3 h de forge vers $HIBOU_STOCKAGE_SAUVEGARDE, 7 jours et 4 semaines."
-  fi
+  [[ "$2" == forge ]] && sauvegarde_forge
 }
 
 # Cartes NVIDIA réservées à vfio-pci, tout de suite et à chaque démarrage. Proxmox 9 active l’IOMMU Intel par défaut.
@@ -1379,8 +1360,13 @@ realm_proxmox() {
     && env=$(ssh_vm "$HIBOU_IP_FORGE" 'sudo cat /srv/hibou/pve-oidc.env' 2>/dev/null) \
     || { note "Forge injoignable ou pas encore configurée : connexion Proxmox par Forgejo à refaire plus tard (relance ce rôle)."; return 0; }
   printf '%s\n' "$ca" > /usr/local/share/ca-certificates/hibou.crt && update-ca-certificates >/dev/null
+  # Proxmox joint lui-même Forgejo pendant la connexion OIDC : sans résolution de forge, « failed to lookup address ».
+  getent hosts "forge.$DOMAINE" >/dev/null || {
+    printf '%s forge.%s   # Hibou : connexion Proxmox par Forgejo\n' "$HIBOU_IP_FORGE" "$DOMAINE" >> /etc/hosts
+    note "forge.$DOMAINE ajouté à /etc/hosts de cet hôte (il ne le résolvait pas)."; }
   id=$(sed -n 's/^PVE_ID=//p' <<< "$env"); secret=$(sed -n 's/^PVE_SECRET=//p' <<< "$env")
-  local opts=(--issuer-url "https://forge.$DOMAINE/" --client-id "$id" --client-key "$secret" --autocreate 1 --comment "Hibou · Forge")
+  # Sans barre finale : c’est l’émetteur annoncé par Forgejo, Proxmox exige l’égalité exacte (« unexpected issuer URI »).
+  local opts=(--issuer-url "https://forge.$DOMAINE" --client-id "$id" --client-key "$secret" --autocreate 1 --comment "Hibou · Forge")
   # --username-claim n’est accepté qu’à la création (realm modify le refuse : déjà créé par forge, ou cluster).
   if pveum realm list --output-format json | jq -e '.[] | select(.realm=="forgejo")' >/dev/null; then pveum realm modify forgejo "${opts[@]}"
   else pveum realm add forgejo --type openid --username-claim username "${opts[@]}"; fi
@@ -1389,6 +1375,33 @@ realm_proxmox() {
     || pveum user add "$HIBOU_ADMIN_NOM@forgejo" --email "$HIBOU_ADMIN_MAIL"
   pveum acl modify / --users "$HIBOU_ADMIN_NOM@forgejo" --roles Administrator
   fait "Proxmox : connexion par Forgejo active, $HIBOU_ADMIN_NOM@forgejo administrateur. root@pam reste l’accès de secours."
+}
+
+sauvegarde_forge() {  # hôte de forge : tâche vzdump nocturne et métrique de dernière réussite
+  [[ -n "${HIBOU_STOCKAGE_SAUVEGARDE:-}" ]] || erreur "Aucun stockage de sauvegarde dans la configuration." "Refais le menu du bundle (« Tout refaire ») et indique un stockage Proxmox."
+  pvesm status --storage "$HIBOU_STOCKAGE_SAUVEGARDE" --content backup >/dev/null 2>&1 \
+    || erreur "Le stockage $HIBOU_STOCKAGE_SAUVEGARDE n’existe pas ou n’accepte pas les sauvegardes." "Datacenter > Storage : ajoute-le avec le contenu « VZDump backup file », puis relance."
+  install -d /var/lib/prometheus/node-exporter
+  cat > /usr/local/bin/hibou-vzdump-hook <<'EOF'
+#!/bin/sh
+# Appelé par vzdump : note l’heure de chaque sauvegarde réussie pour Prometheus.
+[ "$1" = "backup-end" ] || exit 0
+[ "$3" = "VMID_FORGE" ] || exit 0   # forge seulement : une autre VM sauvegardée une fois déclencherait l’alerte « plus de 26 h »
+f=/var/lib/prometheus/node-exporter/hibou_vzdump_$3.prom
+echo "hibou_sauvegarde_derniere_reussite_timestamp{type=\"vzdump\",vmid=\"$3\"} $(date +%s)" > "$f.tmp" && mv "$f.tmp" "$f"
+EOF
+  sed -i "s/VMID_FORGE/$HIBOU_VMID_FORGE/" /usr/local/bin/hibou-vzdump-hook
+  chmod 755 /usr/local/bin/hibou-vzdump-hook
+  # Une sauvegarde lancée à la main (vzdump <forge> …) compte aussi : crochet global de cet hôte, sans écraser un script existant.
+  if ! grep -q '^script:' /etc/vzdump.conf 2>/dev/null; then echo "script: /usr/local/bin/hibou-vzdump-hook" >> /etc/vzdump.conf
+  elif ! grep -q '^script: /usr/local/bin/hibou-vzdump-hook' /etc/vzdump.conf; then
+    note "vzdump a déjà un script global sur cet hôte : seules les sauvegardes planifiées de forge mettent la métrique à jour."; fi
+  pvesh get /cluster/backup/hibou >/dev/null 2>&1 && pvesh delete /cluster/backup/hibou
+  # forge seule : les VM GPU ne contiennent que des modèles et une configuration, rejouables depuis le bundle.
+  pvesh create /cluster/backup --id hibou --schedule "03:00" --vmid "$HIBOU_VMID_FORGE" --mode snapshot --compress zstd \
+    --storage "$HIBOU_STOCKAGE_SAUVEGARDE" --prune-backups keep-daily=7,keep-weekly=4 \
+    --script /usr/local/bin/hibou-vzdump-hook --notes-template "Hibou {{guestname}}" >/dev/null
+  fait "Sauvegarde quotidienne à 3 h de forge vers $HIBOU_STOCKAGE_SAUVEGARDE, 7 jours et 4 semaines."
 }
 
 ssh_vm() {  # adresse commande...
@@ -1513,7 +1526,8 @@ sur_proxmox() {  # rôle bundle
   fi
   etape "Attente de la VM ($ip)"; attendre_ssh "$ip"; fait "La VM répond."
   saute copie || copier_vers_vm "$role" "$b" "$ip"
-  if [[ "$role" == forge ]]; then dans_la_vm "$ip" forge ""; [[ -n "${HIBOU_MAJ:-}" ]] || realm_proxmox; return; fi
+  # Connexion Proxmox par Forgejo rejouée aussi en mise à jour (idempotente) : une correction doit atteindre les hôtes existants.
+  if [[ "$role" == forge ]]; then dans_la_vm "$ip" forge ""; sauvegarde_forge; realm_proxmox; return; fi
   dans_la_vm "$ip" "$role" socle
   # En mise à jour, on ne redémarre que si le noyau ou le pilote ont changé.
   if [[ -n "${HIBOU_MAJ:-}" ]] && ! ssh_vm "$ip" 'test -f /var/run/reboot-required'; then HIBOU_SAUTER+=",redemarrage"; fi
@@ -1523,7 +1537,16 @@ sur_proxmox() {  # rôle bundle
     ssh_vm "$ip" nvidia-smi -L || erreur "La VM ne voit pas ses cartes." "Dans la VM : sudo dmesg | grep -i nvidia. Sur l’hôte : dmesg | grep -i vfio."
   fi
   dans_la_vm "$ip" "$role" suite
-  [[ -n "${HIBOU_MAJ:-}" ]] || realm_proxmox
+  realm_proxmox
+  # Open WebUI suit les modèles de ce serveur : nouveau profil, ou doc installé après forge. Script, configuration
+  # et amorces d’abord recopiés sur forge, pour qu’une forge plus ancienne ne joue pas autre chose.
+  if ssh_vm "$HIBOU_IP_FORGE" true 2>/dev/null; then
+    rsync -a -e "ssh -i /root/.ssh/hibou_ed25519 -o BatchMode=yes -o UserKnownHostsFile=/root/.ssh/hibou_known_hosts" \
+      "$b/hibou" "$b/config.env" "$b/amorces" "hibou@$HIBOU_IP_FORGE:hibou-bundle/" \
+      && dans_la_vm "$HIBOU_IP_FORGE" forge owui
+  else
+    note "Forge injoignable : relance « hibou mettre-a-jour forge » pour que le chat suive les modèles de $role."
+  fi
   if ssh_vm "$ip" 'for i in $(seq 1 60); do curl -fsS localhost:8080/health >/dev/null && exit 0; sleep 5; done; exit 1'; then
     fait "API du serveur $role en ligne."
     if ! saute evaluation; then
@@ -2018,6 +2041,15 @@ EOF
 
 installer_forge() {
   local b="$1"
+  # Phase « owui », lancée par l’installation ou la mise à jour de doc ou dev : Open WebUI suit les modèles réellement
+  # servis (profil changé, base de templates à remplir une fois doc en ligne), l’évaluation aussi.
+  if [[ "${HIBOU_PHASE:-}" == owui ]]; then
+    ADMIN="$HIBOU_ADMIN_NOM"; MDP="$HIBOU_ADMIN_MDP"
+    [[ -d /usr/local/lib/hibou ]] && cp "$b/config.env" /usr/local/lib/hibou/config.env
+    etape "Open WebUI : modèles rebranchés sur les modèles installés"
+    amorcer_open_webui "$b" "" || note "Open WebUI n’a pas tout accepté : vérifie les modèles Hibou dans son espace de travail."
+    return 0
+  fi
   if ! saute socle; then
   etape "Docker, DNS, heure"
   source_locale "$b/apt/ubuntu"
@@ -2710,6 +2742,35 @@ amorcer() {  # dépôt dossier : premier commit, avant la protection de main
   note "$1 amorcé."
 }
 
+# Dépôt déjà amorcé : les outils, le workflow et les gabarits d’une nouvelle version arrivent par une pull request
+# (main est protégée et la fusion reste humaine). Rien n’est proposé si tout est déjà à jour ; PR déjà ouverte : sa branche est mise à jour.
+outils_par_pr() {  # dépôt dossier_amorce
+  local tmp b="hibou/outils-$VERSION_HIBOU" auth p ouverte=""
+  auth="Authorization: Basic $(printf '%s:%s' "$ADMIN" "$MDP" | base64 -w0)"
+  api GET "/repos/hibou/$1/pulls?state=open" | jq -e --arg b "$b" 'any(.[]; .head.ref == $b)' >/dev/null && ouverte=1
+  tmp=$(mktemp -d)
+  git -c http.extraHeader="$auth" clone -q "http://127.0.0.1:3000/hibou/$1.git" "$tmp/d" || { rm -rf "$tmp"; return 1; }
+  for p in outils .forgejo templates .markdownlint-cli2.yaml; do
+    [[ -e "$2/$p" ]] && cp -a "$2/$p" "$tmp/d/"
+  done
+  if [[ -n "$(git -C "$tmp/d" status --porcelain)" ]]; then
+    git -C "$tmp/d" checkout -qB "$b"
+    git -C "$tmp/d" add -A
+    git -C "$tmp/d" -c user.name=Hibou -c user.email="hibou@$DOMAINE" commit -qm "Hibou $VERSION_HIBOU : mise à jour des outils"
+    if [[ -n "$ouverte" ]]; then
+      git -C "$tmp/d" -c http.extraHeader="$auth" push -q -f origin "$b" && note "$1 : pull request des outils $VERSION_HIBOU mise à jour, à relire et fusionner." \
+        || note "$1 : la branche $b n’a pas pu être mise à jour."
+    else
+    git -C "$tmp/d" -c http.extraHeader="$auth" push -q -f origin "$b" \
+      && api POST "/repos/hibou/$1/pulls" "$(jq -nc --arg b "$b" --arg v "$VERSION_HIBOU" '{head:$b, base:"main", title:("Hibou " + $v + " : mise à jour des outils"),
+           body:"Outils, workflow et gabarits de la nouvelle version du bundle. À relire et fusionner pour que le runner les utilise."}')" >/dev/null \
+      && note "$1 : outils de la version $VERSION_HIBOU proposés par pull request, à relire et fusionner." \
+      || note "$1 : la pull request de mise à jour des outils n’a pas pu être ouverte."
+    fi
+  fi
+  rm -rf "$tmp"
+}
+
 equipe_id() { api GET "/orgs/hibou/teams/search?q=$1" | jq -r --arg n "$1" '.data[] | select(.name==$n) | .id'; }
 
 configurer() {
@@ -2930,7 +2991,7 @@ EOF
     echo "         npm config set //forge.$DOMAINE/api/packages/hibou/npm/:_authToken <jeton>"
     echo "  docker login forge.$DOMAINE ; docker pull forge.$DOMAINE/hibou/<image>:<tag>"
     echo; echo "Proxmox : « hibou installer » déclare Forgejo sur chaque hôte. À la main :"
-    echo "  pveum realm add forgejo --type openid --issuer-url https://forge.$DOMAINE/ --client-id ${pve% *} --client-key ${pve#* } --username-claim username --autocreate 1"
+    echo "  pveum realm add forgejo --type openid --issuer-url https://forge.$DOMAINE --client-id ${pve% *} --client-key ${pve#* } --username-claim username --autocreate 1"
   } > "$acces"
   umask 022
   fait "Clés d’API et commande Proxmox dans $acces (lisible par root seulement)."
@@ -3003,7 +3064,7 @@ amorcer_open_webui() {  # bundle jeton_redac
   # GET /knowledge/{id} ne liste plus ses fichiers : on compte par /files (champ total).
   if [[ "$(curl -fsS "${h[@]}" "$u/knowledge/$(jq -r .id <<< "$kb")/files" | jq '.total // 0')" == 0 ]]; then
     for f in "$1"/amorces/hibou-docs/templates/*.md; do
-      fid=$(curl -fsS -H "Authorization: Bearer $jeton" -F "file=@$f" "$u/files/" | jq -r .id)
+      fid=$(curl -fsS -H "Authorization: Bearer $jeton" -F "file=@$f" "$u/files/?process_in_background=false" | jq -r .id)   # texte extrait avant l’ajout à la base
       curl -fsS "${h[@]}" "$u/knowledge/$(jq -r .id <<< "$kb")/file/add" -d "{\"file_id\":\"$fid\"}" >/dev/null 2>&1 \
         || { note "Base « Hibou · Templates » vide : les embeddings de doc ne répondent pas. Après « installer doc », relance « hibou mettre-a-jour forge »."; break; }
     done
@@ -3016,11 +3077,17 @@ amorcer_open_webui() {  # bundle jeton_redac
   curl -fsS "${h[@]}" "$u/knowledge/$(jq -r .id <<< "$kbdoc")/access/update" -d "{\"access_grants\":$public}" >/dev/null || return 1
   cle_owui=$(curl -fsS "${h[@]}" -X POST "$u/auths/api_key" | jq -r '.api_key // empty')
   if [[ -n "$cle_owui" ]]; then
+    # Base remplie avec la documentation fusionnée (main de hibou-docs), par l’outil du bundle (toujours le plus récent) :
+    # pas avec les documents de départ, qui effaceraient les pages validées depuis l’installation.
+    local docs_main; docs_main=$(mktemp -d)
     api PUT /repos/hibou/hibou-docs/actions/secrets/OWUI_CLE "$(jq -nc --arg d "$cle_owui" '{data:$d}')" >/dev/null \
-      && docker run --rm --network hibou-forge_default -v "$1/amorces/hibou-docs:/d:ro" -w /d \
-        -e OWUI_URL=http://open-webui:8080 -e OWUI_CLE="$cle_owui" hibou/docs-builder:actuel python3 outils/synchroniser_owui.py docs >/dev/null \
-      && fait "Documentation de départ envoyée au chat ; le runner la tient à jour après chaque fusion." \
-      || note "Clé du runner ou première synchronisation refusée : la base se remplira à la prochaine fusion dans hibou-docs."
+      && git -c http.extraHeader="Authorization: Basic $(printf '%s:%s' "$ADMIN" "$MDP" | base64 -w0)" clone -q --depth 1 http://127.0.0.1:3000/hibou/hibou-docs.git "$docs_main/d" \
+      && docker run --rm --network hibou-forge_default -v "$docs_main/d:/d:ro" -v "$1/amorces/hibou-docs/outils/synchroniser_owui.py:/outil.py:ro" -w /d \
+        -e OWUI_URL=http://open-webui:8080 -e OWUI_CLE="$cle_owui" hibou/docs-builder:actuel python3 /outil.py docs >/dev/null \
+      && fait "Documentation fusionnée envoyée au chat ($(find "$docs_main/d/docs" -name '*.md' | wc -l) pages) ; le runner la tient à jour après chaque fusion." \
+      || note "Clé du runner ou synchronisation refusée : la base se remplira à la prochaine fusion dans hibou-docs."
+    rm -rf "$docs_main"
+    outils_par_pr hibou-docs "$1/amorces/hibou-docs" || note "hibou-docs : dépôt illisible, outils non comparés."
   else
     note "Open WebUI n’a pas délivré de clé d’API : la synchronisation de la documentation est à brancher à la main (secret OWUI_CLE de hibou-docs)."
   fi

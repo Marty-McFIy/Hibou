@@ -14,6 +14,9 @@ Détail, symptômes et preuves : `JOURNAL-CORRECTIONS.md`.
 - Open WebUI : les 8 modèles (dont « Documentation interne ») sont créés ou mis à jour, sans `|| true` (B21).
 - Agent dev : `main` protégée dans chaque dépôt qu'il crée, rien à la racine de /workspace, `rm -r … .git` refusé (B22) ; le relecteur signale ses échecs dans la PR (B23).
 - Relecteur : au plus 10 remarques, pénalité de répétition, doublons retirés (B24 : le 4B bouclait jusqu'à la limite).
+- Documentation : base du chat resynchronisée depuis `main`, outils de `hibou-docs` mis à jour par pull request (B35).
+- Proxmox : connexion par Forgejo opérationnelle (résolution de forge, émetteur exact, rejouée en mise à jour) (B36).
+- Changement de profil : Open WebUI et l'évaluation suivent automatiquement doc et dev (B37) ; sauvegarde manuelle comptée (B38).
 - Chat : **les comptes non administrateurs peuvent enfin utiliser les modèles Hibou** (droits Open WebUI 0.13, B31) ;
   **export Word, PDF, PowerPoint, Excel** téléchargeable dans la conversation (B32) ; **compression automatique** des longues conversations (B33) ;
   publication au nom de la personne, branche `redaction/<personne>/…` (B34).

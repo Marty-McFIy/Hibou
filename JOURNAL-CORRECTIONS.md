@@ -249,6 +249,54 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 - dev (OpenCode, contexte 32 768 sur `dev:5`) : **compaction automatique** quand l'historique approche de la limite (contexte − sortie réservée = 24 576) ;
   OpenCode fait résumer la session par le modèle et repart du résumé (B17 : 2 compactions sur un essai de 10 min).
 
+## B25 — Agent dev : push vers un dépôt inexistant accepté (dépôt sans main ni protection) ; pip ne trouve pas les dépendances compilées
+- Constat (essai web n° 5, projet `verif-nombre`) : l'agent ignore `forgejo-nouveau-depot`, fait `git init`, `git remote add`, `git push -u origin agent/verif-nombre` :
+  **le dépôt naît par le push** (`ENABLE_PUSH_CREATE_ORG=true`), sans `main` ni protection ; `forgejo-pr` répond 404 (base `main` absente) ; ~60 tours de contournements (curl inventés, `push --force`…).
+  `pip install requests` : `requests` trouvé dans le miroir, `charset-normalizer` « from versions: none » alors qu'il est publié.
+- Causes : création par push activée (mécanisme d'origine, remplacé par `forgejo-nouveau-depot`) ; le miroir ne couvrait que Python 3.12 (choix du menu d'essai),
+  l'agent tourne en **Python 3.11** (`node:22-bookworm-slim`, Debian 12) : la roue cp312 ne s'installe pas.
+- Diff : `ENABLE_PUSH_CREATE_ORG=false` ; `hibou-miroir.py` crée ses dépôts git par l'API (409 = déjà là) avant le push ; `telecharger` ajoute toujours 3.11 aux versions du miroir (note affichée).
+- Test : `telecharger` miroir (2 min 37 s, roue `cp311` ajoutée) ; `mettre-a-jour forge` n° 25 : pypi « 2 publiés, 5 déjà présents », Hello-World poussé, aucune erreur.
+  Dans le conteneur de l'agent : `pip install requests` dans un `.venv` → OK (`charset_normalizer` importé) ; `npm install is-number` → OK ; push vers `hibou/depot-fantome` → refusé (« the repository exists ? »). **Prouvé.**
+
+## B26 — L'agent affiche son jeton Forgejo dans la conversation
+- Constat (même essai) : `echo $FORGEJO_TOKEN` demandé par l'agent, accepté par le pilote de test : jeton dans l'historique de la session (visible par tous les utilisateurs d'OpenCode, cf. constat « un seul OpenCode partagé »)
+  et dans le journal de test (masqué depuis, journal en 600, session supprimée).
+- Diff : refus d'office `*echo*TOKEN*`, `*printenv*`, `env`, `*/proc/*/environ*` ; consigne « N'affiche jamais $FORGEJO_TOKEN ni l'environnement ».
+- Test : `mettre-a-jour forge` n° 26 : règles présentes dans `opencode.json`, consigne dans `AGENTS.md`. 
+
+## B27 — Les conversations OpenCode disparaissent à chaque mise à jour
+- Constat : après `mettre-a-jour forge`, `GET /session` → 0 session. Les données d'OpenCode (`/home/node/.local/share/opencode`, `opencode.db`) vivent dans le conteneur, recréé à chaque mise à jour.
+- Diff : volume `/srv/opencode` (uid 1000) monté sur ce chemin, créé avec `/srv/workspace`.
+- Test : `mettre-a-jour forge` n° 27 : `/srv/opencode` monté (log, repos). Survie d'une session à une mise à jour : voir essai web n° 6.
+
+## Constat — un seul OpenCode pour toute l'équipe dev
+- Un conteneur, un `/workspace`, une liste de sessions commune, un compte Forgejo (`hibou-dev`), une clé d'API (même priorité pour tous). Accès : équipes `dev` et `owners` par oauth2-proxy.
+- Remplacé par B30 (une instance par personne).
+
+## B28 — `mettre-a-jour` réussit alors qu'un conteneur redémarre en boucle
+- Constat : après la première version de B27 (volume monté sur `.local/share/opencode`), OpenCode plante (`EACCES: mkdir '/home/node/.local/state'` : Docker a créé `.local` au nom de root),
+  mais `mettre-a-jour forge` n° 27 finit en rc=0 : `docker compose up -d` réussit dès que les conteneurs sont lancés.
+- Diff : B27 monte tout `/home/node/.local` ; `demarrer` regarde 10, 20 et 30 s après si un service est `restarting` et s'arrête avec son nom et la commande de journaux. `--remove-orphans` retire les services disparus du compose.
+- Test : `mettre-a-jour forge` n° 28 : OpenCode `Up`, `opencode.db` dans `/srv/opencode/share/opencode` ; n° 29 : contrôle passé, ancien service `opencode` retiré. **Prouvé** (le cas d'échec n'a pas été rejoué volontairement).
+
+## B29 — Agent dev : PR annoncée mais pas ouverte, `.venv` commité (essai web n° 6)
+- Constat : après B22 et B25, l'agent commence bien par `forgejo-nouveau-depot` (main protégée) et pousse `agent/verif-nombre` en 3 min 14 s,
+  mais annonce « Pull request créée » avec le lien `/compare/` que Forgejo affiche au push (aucune PR), et commite `.venv` (pas de `.gitignore`). `npm install` non lancé.
+- Diff : `forgejo-nouveau-depot` dépose un `.gitignore` de départ (`.venv/`, `venv/`, `__pycache__/`, `*.pyc`, `node_modules/`, `.pytest_cache/`) ; consigne : « Un lien en /compare/ n'est pas une pull request ».
+- Test (instance d'alice, commandes à la main) : `.gitignore` présent, `.venv` créé puis `git add .` : `.venv` non commité. Comportement du modèle à revoir à l'essai suivant.
+
+## B30 — Une instance OpenCode par personne (demande de l'utilisateur)
+- Avant : un conteneur, un `/workspace`, des sessions communes, une clé d'API, commits au nom de `hibou-dev`.
+- Diff : `services_opencode` génère `opencode-<utilisateur>` pour chaque personne de l'équipe dev (`/srv/workspace/<u>` → `/workspace`, `/srv/opencode/<u>` → `.local`,
+  `/srv/hibou/opencode/<u>.json` avec la clé de la personne, `GIT_AUTHOR_*` = la personne, committer `hibou-dev`, `HIBOU_UTILISATEUR`) ;
+  `routes_opencode` : Caddy route par `X-Auth-Request-Email` (en-tête client retiré avant `forward_auth`), sinon 403 « Pas d'espace OpenCode pour ce compte » ;
+  `forgejo-pr` ajoute « Demandé par @<utilisateur> » ; note en mise à jour si `/srv/workspace` contient des dossiers hors espaces personnels.
+- Test : `mettre-a-jour forge` n° 29 (3 min 51 s) : `opencode-alice` seul (bob est doc seulement), ancien `opencode` retiré, note sur `verif-nombre`.
+  Vraie connexion (Forgejo → OAuth → Caddy) : alice → OpenCode (HTTP 200) ; bob → 403 (oauth2-proxy, pas dans dev) ; hibou-admin → 403 « Pas d'espace OpenCode ».
+  Dans l'instance d'alice : commit `alice <alice@hibou.lan>`, committer `hibou-dev`, PR « Demandé par @alice ». **Prouvé.**
+- Mémoire : ~350 Mo par instance sur forge.
+
 ## Constats sur les agents (doc et dev), profil ≥ 4 Go
 - Où vont les fichiers : **dev** (OpenCode, conteneur sur forge) écrit dans `/workspace/<projet>` = `/srv/workspace/<projet>` de la VM forge (uid 1000), un clone par projet.
   **doc** (Open WebUI) n'écrit aucun fichier : l'outil dépose le document par l'API de Forgejo, directement dans hibou-docs (`docs/<dossier>/<nom>.md`).

@@ -12,12 +12,12 @@ push    : lancé dans l’image hibou/miroir sur forge (twine, npm, git, client 
 Listes lues dans --src (une entrée par ligne, '#' = commentaire) :
   requirements.txt    paquets Python (syntaxe pip)           -> registre PyPI de Forgejo
   npm-packages.txt    paquets npm (nom ou nom@version)      -> registre npm de Forgejo
-  git-repos.txt       URLs de dépôts git                     -> dépôts Forgejo (push-to-create)
+  git-repos.txt       URLs de dépôts git                     -> dépôts Forgejo (créés par l’API, puis push)
   docker-images.txt   images Docker (nom:tag)                -> registre de conteneurs de Forgejo
 
 --dry-run : affiche ce qui serait fait sans rien exécuter ni télécharger.
 """
-import argparse, base64, hashlib, json, os, re, shlex, shutil, subprocess, sys, urllib.request
+import argparse, base64, hashlib, json, os, re, shlex, shutil, subprocess, sys, urllib.error, urllib.request
 from pathlib import Path
 
 # --------------------------------------------------------------------------- utilitaires
@@ -233,6 +233,16 @@ def push(a):
     if idx.is_file() and "git" in only:
         for e in json.loads(idx.read_text()):
             remote = f"http://{a.user}:{a.token}@{host_port}/{a.owner}/{e['name']}.git"
+            # Dépôt créé par l’API (409 : déjà là) : Forgejo n’accepte plus la création par push.
+            if not dry:
+                req = urllib.request.Request(f"{base}/api/v1/orgs/{a.owner}/repos", method="POST",
+                                             data=json.dumps({"name": e["name"], "private": True}).encode(),
+                                             headers={"Content-Type": "application/json", "Authorization": f"token {a.token}"})
+                try:
+                    urllib.request.urlopen(req, timeout=60)
+                except urllib.error.HTTPError as x:
+                    if x.code != 409:
+                        log(f"git ÉCHEC création de {a.owner}/{e['name']} : HTTP {x.code}")
             # Conteneur root, dépôt monté appartenant à l’utilisateur du bundle : git exige safe.directory.
             run(["git", "-c", f"safe.directory={(d / e['dir']).resolve()}", "-C", d / e["dir"], "-c", "credential.helper=", "push", "--prune", remote,
                  "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"], dry)

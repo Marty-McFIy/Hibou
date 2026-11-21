@@ -886,6 +886,8 @@ curl -fsS -o /dev/null -H "Authorization: token $FORGEJO_TOKEN" "$r/main" 2>/dev
   || curl -fsS -o /dev/null -H "Authorization: token $FORGEJO_TOKEN" -H 'Content-Type: application/json' "$r" \
        -d '{"rule_name":"main","enable_push":false,"required_approvals":1,"block_on_rejected_reviews":true,"dismiss_stale_approvals":true,"apply_to_admins":true}' \
   || echo "Attention : main n'a pas pu être protégée. Préviens la personne qui t'a demandé le projet." >&2
+# .gitignore de départ : un petit modèle fait « git add . » et commite son .venv malgré la consigne.
+[ -e "$d/.gitignore" ] || printf '.venv/\nvenv/\n__pycache__/\n*.pyc\nnode_modules/\n.pytest_cache/\n' > "$d/.gitignore"
 if [ -n "$ancien" ]; then
   (cd "$ancien" && tar --exclude=./.git -cf - .) | (cd "$d" && tar -xf -)
   echo "Tes fichiers de $ancien sont recopiés dans le clone, sans commit. L'ancien dossier reste en place : ne t'en sers plus."
@@ -901,6 +903,9 @@ b=$(git rev-parse --abbrev-ref HEAD)
 [ "$b" != main ] || { echo "Tu es sur main : crée d’abord une branche agent/<sujet>." >&2; exit 1; }
 p=$(basename "$(git rev-parse --show-toplevel)")
 git push -u origin "$b"
+[ -z "${HIBOU_UTILISATEUR:-}" ] || d="$d
+
+Demandé par @$HIBOU_UTILISATEUR, via l'agent Hibou."
 jq -n --arg h "$b" --arg t "$t" --arg d "$d" '{head:$h, base:"main", title:$t, body:$d}' \
   | curl -fsS -H "Authorization: token $FORGEJO_TOKEN" -H 'Content-Type: application/json' -d @- \
     "$FORGEJO_URL/api/v1/repos/$FORGEJO_ORG/$p/pulls" | jq -r '"Pull request ouverte : " + .html_url'
@@ -1022,6 +1027,9 @@ COPY hibou-miroir.py /app/hibou-miroir.py
 ENTRYPOINT ["python3", "/app/hibou-miroir.py"]
 EOF
   construire miroir; rm -rf "$CTX"
+  # Le python3 de l’agent (image opencode, node:22-bookworm-slim = Debian 12) doit toujours être couvert :
+  # sans lui, pip ne trouve pas les roues compilées (charset-normalizer…) pour l’agent.
+  [[ " $HIBOU_PY_VERSIONS " == *" 3.11 "* ]] || { HIBOU_PY_VERSIONS+=" 3.11"; note "Python 3.11 ajouté au miroir : c’est celui de l’agent OpenCode."; }
   HIBOU_PY_VERSIONS="$HIBOU_PY_VERSIONS" python3 "$ICI_HIBOU/hibou-miroir.py" prepare --src "$SORTIE/miroir.d" --out "$SORTIE/mirror"
   fait "Miroir prêt : $(du -sh "$SORTIE/mirror" | cut -f1)."
   fi
@@ -1118,8 +1126,16 @@ verifier_dkms() {
 }
 
 demarrer() {  # dossier [services...]
-  (cd "$1" && docker compose up -d --quiet-pull "${@:2}") \
+  (cd "$1" && docker compose up -d --quiet-pull --remove-orphans "${@:2}") \
     || erreur "Les services de $1 ne démarrent pas." "Lis : docker compose -f $1/compose.yaml logs --tail 50"
+  # « up » réussit même si un conteneur plante juste après (ex. droits d’un volume) : on regarde 30 s plus tard.
+  local i boucle
+  for i in 1 2 3; do
+    sleep 10
+    boucle=$(cd "$1" && docker compose ps -a --status restarting --format '{{.Service}}' | tr '\n' ' ')
+    [[ -z "${boucle// }" ]] || break
+  done
+  [[ -z "${boucle// }" ]] || erreur "Service(s) qui redémarrent en boucle : $boucle" "Lis : docker compose -f $1/compose.yaml logs --tail 50 $boucle"
 }
 
 # Démarrage des services à chaque mise sous tension, une fois Docker et le pilote prêts.
@@ -2018,8 +2034,7 @@ installer_forge() {
   saute images || { etape "Images"; charger_images "$b" forge; }
   if ! saute config; then
   etape "Forgejo, registre, applications"
-  install -d /srv/forgejo/data/gitea /srv/forgejo/runner /srv/registry /srv/docs-site /srv/hibou /srv/workspace
-  chown 1000:1000 /srv/workspace
+  install -d /srv/forgejo/data/gitea /srv/forgejo/runner /srv/registry /srv/docs-site /srv/hibou /srv/workspace /srv/opencode
   if [[ ! -s /srv/forgejo/secrets.env ]]; then
     local s; umask 077
     for s in SECRET_KEY INTERNAL_TOKEN; do
@@ -2108,8 +2123,10 @@ chat.$DOMAINE {
 code.$DOMAINE {
 	import hibou
 	route {
+		request_header -X-Auth-Request-Email   # seul oauth2-proxy le fournit, jamais le navigateur
 		import sso hibou:dev,hibou:owners
-		reverse_proxy opencode:4096
+$(routes_opencode)
+		respond "Pas d’espace OpenCode pour ce compte. Demande à l’administrateur de t’ajouter à l’équipe dev." 403
 	}
 }
 # API : la clé est vérifiée par le service de priorité de chaque serveur.
@@ -2141,9 +2158,8 @@ services:
       FORGEJO__oauth2__ENABLED: "true"
       FORGEJO__actions__ENABLED: "true"
       FORGEJO__actions__DEFAULT_ACTIONS_URL: self
-      # L’agent crée un projet en poussant vers hibou/<nouveau>.git ; le dépôt naît privé, branche main.
-      FORGEJO__repository__ENABLE_PUSH_CREATE_ORG: "true"
-      FORGEJO__repository__DEFAULT_PUSH_CREATE_PRIVATE: "true"
+      # Pas de création par push : un dépôt né ainsi n’a ni main ni protection. L’agent passe par forgejo-nouveau-depot.
+      FORGEJO__repository__ENABLE_PUSH_CREATE_ORG: "false"
       FORGEJO__repository__DEFAULT_BRANCH: main
       FORGEJO__webhook__ALLOWED_HOST_LIST: relecteur   # seul hôte interne joignable par les webhooks
       FORGEJO__DEFAULT__APP_NAME: "Hibou · Forge"
@@ -2178,27 +2194,7 @@ services:
       - /srv/hibou/charte/open-webui/static/splash.png:/app/build/static/splash.png:ro
       - /srv/hibou/charte/open-webui/static/splash-dark.png:/app/build/static/splash-dark.png:ro
       - /srv/hibou/charte/open-webui/static/logo.png:/app/build/static/logo.png:ro
-  opencode:
-    image: hibou/opencode:actuel
-    profiles: [apps]
-    restart: unless-stopped
-    volumes:
-      - /srv/workspace:/workspace
-      - /srv/hibou/opencode.json:/home/node/.config/opencode/opencode.json:ro
-      - /srv/hibou/charte/opencode/themes:/home/node/.config/opencode/themes:ro
-      - /srv/hibou/ssh:/home/node/.ssh:ro
-      - /srv/hibou/AGENTS.md:/home/node/.config/opencode/AGENTS.md:ro
-      - /srv/hibou/npmrc:/home/node/.npmrc:ro
-      - /srv/hibou/ca-bundle.crt:/etc/hibou/ca-bundle.crt:ro
-    env_file: [{ path: /srv/hibou/opencode.env, required: false }]
-    environment:
-      CURL_CA_BUNDLE: /etc/hibou/ca-bundle.crt
-      GIT_SSL_CAINFO: /etc/hibou/ca-bundle.crt
-      NODE_EXTRA_CA_CERTS: /etc/hibou/ca-bundle.crt
-      GIT_AUTHOR_NAME: hibou-dev
-      GIT_AUTHOR_EMAIL: hibou-dev@$DOMAINE
-      GIT_COMMITTER_NAME: hibou-dev
-      GIT_COMMITTER_EMAIL: hibou-dev@$DOMAINE
+$(services_opencode)
   oauth2-proxy:
     image: ${IMAGES[oauth2-proxy]}
     profiles: [apps]
@@ -2362,6 +2358,7 @@ Forgejo a une seule adresse : https://forge.$DOMAINE (\$FORGEJO_URL). Aucun autr
 - Projet existant : \`git clone git@forge.$DOMAINE:hibou/<projet>.git /workspace/<projet>\`
 - Jamais de push sur main. Travaille sur une branche : \`git checkout -b agent/<sujet>\`, puis commite.
 - Ensuite, depuis le dossier du projet : \`forgejo-pr "<titre>" "<ce qui change et comment le vérifier>"\` (pousse la branche et ouvre la pull request).
+- Un lien en /compare/ n'est pas une pull request : seule \`forgejo-pr\` en ouvre une (elle affiche « Pull request ouverte : … »).
 - Donne l'adresse de la pull request à la fin. Une personne la relit et la fusionne.
 
 ## Hors ligne
@@ -2370,6 +2367,7 @@ Forgejo a une seule adresse : https://forge.$DOMAINE (\$FORGEJO_URL). Aucun autr
 - pytest est déjà installé : \`python3 -m pytest\`.
 - Pour un environnement Python : \`python3 -m venv .venv\`. Mets \`.venv/\`, \`__pycache__/\` et les fichiers générés dans \`.gitignore\` avant le premier \`git add\`.
 - Relis \`git status\` avant chaque commit : rien de généré ni de secret dans le dépôt.
+- N'affiche jamais \$FORGEJO_TOKEN ni l'environnement : la conversation est visible par l'équipe.
 EOF
   chmod 644 /srv/hibou/AGENTS.md
 }
@@ -2561,9 +2559,67 @@ config_opencode() {  # modèles du serveur dev, avec leurs vraies limites de con
     permission: {edit: "allow", bash: {"*": "ask", "git status*": "allow", "git diff*": "allow", "git log*": "allow",
       "ls*": "allow", "cat*": "allow", "grep*": "allow", "rg*": "allow", "git push*main*": "deny", "sudo*": "deny",
       "apt*": "deny", "su *": "deny", "*--index-url*": "deny", "*--break-system-packages*": "deny",
+      "*echo*TOKEN*": "deny", "*printenv*": "deny", "env": "deny", "*/proc/*/environ*": "deny",
       "*rm -*r* .git": "deny", "*rm -*r* .git *": "deny", "*rm -*r* .git/*": "deny", "*rm -*r* */.git*": "deny"}}
   }' > /srv/hibou/opencode.json
   chmod 644 /srv/hibou/opencode.json
+  # Une instance par personne de l’équipe dev : son espace, ses sessions, sa clé (donc son rang dans la file du serveur dev).
+  local nom mail k
+  install -d /srv/hibou/opencode
+  while read -r nom mail k; do
+    jq --arg k "$k" '.provider.hibou.options.apiKey = $k' /srv/hibou/opencode.json > "/srv/hibou/opencode/$nom.json"
+    chmod 644 "/srv/hibou/opencode/$nom.json"
+    install -d -o 1000 -g 1000 "/srv/workspace/$nom" "/srv/opencode/$nom"
+  done < <(utilisateurs_dev)
+  local ancien; ancien=$(find /srv/workspace -mindepth 1 -maxdepth 1 -printf '%f\n' | grep -vxF -f <(utilisateurs_dev | cut -d' ' -f1) | tr '\n' ' ')
+  [[ -z "${ancien// }" ]] || note "Dans /srv/workspace, hors des espaces personnels (version précédente, partagée) : $ancien. Déplace-les dans /srv/workspace/<utilisateur>."
+}
+
+utilisateurs_dev() {  # « nom courriel clé » pour chaque utilisateur de l’équipe dev
+  local u nom mail mdp eq k
+  for u in "${HIBOU_UTILISATEURS[@]}"; do
+    IFS='|' read -r nom mail mdp eq k <<< "$u"
+    [[ ",$eq," == *,dev,* ]] && echo "$nom $mail $k"
+  done
+  return 0
+}
+
+routes_opencode() {  # Caddyfile : chaque personne vers sa propre instance
+  local nom mail k
+  while read -r nom mail k; do
+    printf '\t\t@%s header X-Auth-Request-Email %s\n\t\treverse_proxy @%s opencode-%s:4096\n' "$nom" "$mail" "$nom" "$nom"
+  done < <(utilisateurs_dev)
+}
+
+services_opencode() {  # compose : une instance OpenCode par personne de l’équipe dev
+  local nom mail k
+  while read -r nom mail k; do
+    cat <<YAML
+  opencode-$nom:
+    image: hibou/opencode:actuel
+    profiles: [apps]
+    restart: unless-stopped
+    volumes:
+      - /srv/workspace/$nom:/workspace
+      - /srv/opencode/$nom:/home/node/.local   # sessions et état. Tout .local : monté plus bas, Docker crée .local au nom de root.
+      - /srv/hibou/opencode/$nom.json:/home/node/.config/opencode/opencode.json:ro
+      - /srv/hibou/charte/opencode/themes:/home/node/.config/opencode/themes:ro
+      - /srv/hibou/ssh:/home/node/.ssh:ro
+      - /srv/hibou/AGENTS.md:/home/node/.config/opencode/AGENTS.md:ro
+      - /srv/hibou/npmrc:/home/node/.npmrc:ro
+      - /srv/hibou/ca-bundle.crt:/etc/hibou/ca-bundle.crt:ro
+    env_file: [{ path: /srv/hibou/opencode.env, required: false }]
+    environment:
+      CURL_CA_BUNDLE: /etc/hibou/ca-bundle.crt
+      GIT_SSL_CAINFO: /etc/hibou/ca-bundle.crt
+      NODE_EXTRA_CA_CERTS: /etc/hibou/ca-bundle.crt
+      HIBOU_UTILISATEUR: $nom
+      GIT_AUTHOR_NAME: $nom
+      GIT_AUTHOR_EMAIL: $mail
+      GIT_COMMITTER_NAME: hibou-dev
+      GIT_COMMITTER_EMAIL: hibou-dev@$DOMAINE
+YAML
+  done < <(utilisateurs_dev)
 }
 
 config_open_webui_env() {

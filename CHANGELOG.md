@@ -14,6 +14,9 @@ Détail, symptômes et preuves : `JOURNAL-CORRECTIONS.md`.
 - Open WebUI : les 8 modèles (dont « Documentation interne ») sont créés ou mis à jour, sans `|| true` (B21).
 - Agent dev : `main` protégée dans chaque dépôt qu'il crée, rien à la racine de /workspace, `rm -r … .git` refusé (B22) ; le relecteur signale ses échecs dans la PR (B23).
 - Relecteur : au plus 10 remarques, pénalité de répétition, doublons retirés (B24 : le 4B bouclait jusqu'à la limite).
+- OpenCode : **une instance par personne** de l'équipe dev (espace, conversations conservées aux mises à jour, clé de priorité, commits à son nom) (B30, B27).
+- Agent dev : plus de création de dépôt par push, miroir pip toujours compatible avec le Python de l'agent (B25) ; secrets jamais affichés (B26) ;
+  `.gitignore` de départ et consigne sur les liens `/compare/` (B29). Mise à jour : arrêt si un conteneur redémarre en boucle (B28).
 - Profils : `dev:2` en Coder-Next Q3 et `doc:2` en Gemma Q4 pour tenir dans 48 et 24 Go, complétion 7B téléchargée une seule fois (A2).
 - Rédaction : `publier_forgejo` 0.2.0 met le Markdown aux règles du runner avant publication (B19) ; l'outil est mis à jour à chaque `mettre-a-jour forge` (B20).
 

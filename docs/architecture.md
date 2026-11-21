@@ -68,7 +68,7 @@ Ubuntu 26.04.1 en natif, pilote NVIDIA + NVIDIA Container Toolkit, Docker Engine
 | Conteneur | Rôle | Port interne |
 | --- | --- | --- |
 | `llama-dev` (image `llama.cpp:server-cuda`, tag figé) | Modèle de code, API OpenAI | 8080 |
-| `opencode` | Agent de code, branché sur `llama-dev` et sur Forgejo (clone/push en SSH) | 4096 |
+| `opencode-<utilisateur>` | Agent de code, une instance par personne de l’équipe dev, branché sur `llama-dev` et sur Forgejo (clone/push en SSH) | 4096 |
 | `caddy` | Reverse proxy TLS | 443 |
 
 Les modèles sont servis par **llama-swap** devant `llama-server` : un seul point d’API, le modèle demandé est chargé à la volée et déchargé après inactivité. Catalogue du 5820 (état de l’art de novembre 2026, à valider sur tes tâches) :
@@ -81,7 +81,11 @@ Les modèles sont servis par **llama-swap** devant `llama-server` : un seul poin
 
 Paramètres de départ pour Qwen3.8-27B : `-ngl 99 -c 131072 -fa on --jinja`, décodage spéculatif MTP si la version de llama.cpp du bundle le prend en charge. Le `--jinja` est requis pour l’appel d’outils d’OpenCode.
 
-OpenCode tourne en conteneur avec un volume `/workspace` et une clé SSH dédiée déclarée dans Forgejo. Le développeur s’y connecte par l’interface web d’OpenCode ou en TUI via SSH.
+OpenCode tourne en **une instance par personne de l’équipe dev** : `code.<domaine>` envoie chacun vers la sienne d’après son compte Forgejo (courriel transmis par oauth2-proxy).
+Chaque instance a son espace (`/srv/workspace/<utilisateur>`, vu comme `/workspace`), ses conversations (`/srv/opencode/<utilisateur>`, conservées aux mises à jour)
+et la clé d’API de la personne, donc son rang dans la file du serveur dev. Les commits portent le nom de la personne (committer `hibou-dev`),
+et la pull request indique « Demandé par @<utilisateur> ». Un compte sans instance (équipe doc seule, administrateur) reçoit un refus clair.
+Ajouter quelqu’un à l’équipe dev : relancer le menu (utilisateurs), puis `hibou mettre-a-jour forge`.
 
 ## Nœud 7910 Proxmox : IA de documentation
 
@@ -215,7 +219,7 @@ Forgejo est la source unique des comptes : il sert de fournisseur OpenID Connect
 | Service | Méthode | Réglage clé |
 | --- | --- | --- |
 | Open WebUI | OIDC natif | `OPENID_PROVIDER_URL=https://forge.hibou.lan/.well-known/openid-configuration`, `ENABLE_OAUTH_SIGNUP=true`, connexion par mot de passe désactivée |
-| OpenCode (web) | `oauth2-proxy` devant, branché sur Forgejo | Accès limité au groupe `dev` |
+| OpenCode (web) | `oauth2-proxy` devant, branché sur Forgejo | Accès limité au groupe `dev`, une instance par personne |
 | Grafana | OAuth générique | Rôles déduits des groupes Forgejo |
 | Proxmox | Domaine OpenID | Compte `root@pam` gardé en secours |
 | API llama-swap | Clé par client, vérifiée par Caddy | Une clé pour OpenCode, une pour Open WebUI, une pour le jeu d’évaluation |
@@ -226,7 +230,7 @@ Deux groupes Forgejo suffisent au départ : `dev` et `doc`. Un compte administra
 
 OpenCode travaille avec un compte Forgejo dédié `hibou-dev` et ne peut rien fusionner seul : tout passe par une pull request que tu valides.
 
-- **Forgejo** : `main` protégée (pull request obligatoire, approbation de ton compte, push direct interdit). `hibou-dev` n’écrit que sur des branches `hibou/*`.
+- **Forgejo** : `main` protégée dans chaque dépôt, y compris ceux que l’agent crée par `forgejo-nouveau-depot` (pull request obligatoire, une approbation, push direct interdit, règle appliquée aux administrateurs). Pas de création de dépôt par push.
 - **Conteneur** : utilisateur non root, seul le volume `/workspace` monté, pas de socket Docker, réseau Docker interne qui ne voit que llama-swap et Forgejo.
 - **Permissions OpenCode** (fichier `opencode.json`) :
 

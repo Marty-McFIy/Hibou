@@ -1,0 +1,51 @@
+/* Hibou — Open WebUI, généré depuis tokens.json. Monté sur /app/build/static/custom.css (Open WebUI 0.13). */
+@font-face { font-family: "Fraunces"; src: url("/static/hibou/Fraunces-600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Inter"; src: url("/static/hibou/Inter-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("/static/hibou/JetBrainsMono-500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+
+:root {
+  --color-gray-50: #FBF8F1;
+  --color-gray-100: #F2EEE4;
+  --color-gray-200: #E9E4D8;
+  --color-gray-300: #DCD6C7;
+  --color-gray-400: #C9C3B4;
+  --color-gray-500: #8A93A6;
+  --color-gray-600: #4A5468;
+  --color-gray-700: #2F3B52;
+  --color-gray-800: #1F2839;
+  --color-gray-850: #171E2D;
+  --color-gray-900: #0F1420;
+  --color-gray-950: #0A0E17;
+  /* Noir et blanc purs d’Open WebUI (calques, panneaux, écran de connexion) : fond nuit et fond brume. */
+  --color-black: #0F1420;
+  --color-white: #E9E4D8;
+  --hb-accent: #F2B544;
+  --hb-sur-accent: #0F1420;
+}
+/* Thème clair : texte secondaire en texte-doux Brume (6:1). La gamme commune garde le gris Nuit, illisible sur brume (2,4:1). */
+html:not(.dark) { --color-gray-400: #4A5468; --color-gray-500: #4A5468; }
+html, body { font-family: Inter, system-ui, sans-serif; background: #E9E4D8; color: #0F1420; }
+html.dark, html.dark body { background: #0F1420; color: #E9E4D8; }
+code, pre, kbd, .font-mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+h1, h2, .text-2xl, .text-3xl { font-family: Fraunces, Georgia, serif; font-weight: 600; }
+
+/* Liens et invites : accent-texte, lisible dans les deux thèmes. */
+a { color: #7A4F00; }
+html.dark a { color: #F2B544; }
+::selection { background: #F2B544; color: #0F1420; }
+
+/* Bouton d’envoi : action principale. */
+#send-message-button:not(:disabled) { background: #F2B544 !important; color: #0F1420 !important; box-shadow: inset 0 1px 0 rgba(255,255,255,0.45), 0 2px 0 #b9821f, 0 6px 14px rgba(0,0,0,0.4); }
+
+/* Champ de saisie en creux. */
+#chat-input-container, #chat-input { box-shadow: inset 0 2px 4px rgba(15,20,32,0.16), inset 0 -1px 0 rgba(255,255,255,0.7); border-radius: 22px; }
+html.dark #chat-input-container, html.dark #chat-input { box-shadow: inset 0 2px 4px rgba(0,0,0,0.6), inset 0 -1px 0 rgba(233,228,216,0.05); }
+
+/* Focus clavier : anneau plein, 2 px décollés de 2 px. */
+:focus-visible { outline: none !important; box-shadow: 0 0 0 2px #e9e4d8, 0 0 0 4px #0f1420 !important; }
+html.dark :focus-visible { box-shadow: 0 0 0 2px #0f1420, 0 0 0 4px #f2b544 !important; }
+
+/* Blocs de code : le terminal reste nuit dans les deux thèmes. */
+pre, .codeblock { background: #0A0E17 !important; color: #E9E4D8 !important; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

@@ -1,0 +1,74 @@
+/* Hibou Nuit — thème Forgejo généré depuis tokens.json. */
+@import url("./theme-forgejo-dark.css");
+@font-face { font-family: "Fraunces"; src: url("../fonts/Fraunces-600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Inter"; src: url("../fonts/Inter-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("../fonts/JetBrainsMono-500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+
+gitea-theme-meta-info { --theme-display-name: "Hibou Nuit"; }
+
+:root {
+  --is-dark-theme: true;
+  --fonts-proportional: Inter, system-ui, sans-serif;
+  --fonts-monospace: "JetBrains Mono", ui-monospace, monospace;
+  --color-body: #0F1420;
+  --color-box-body: #171E2D;
+  --color-box-body-highlight: #1F2839;
+  --color-box-header: #1F2839;
+  --color-card: #171E2D;
+  --color-menu: #1F2839;
+  --color-nav-bg: #0A0E17;
+  --color-nav-hover-bg: #171E2D;
+  --color-secondary-nav-bg: #0F1420;
+  --color-footer: #0A0E17;
+  --color-header-wrapper: #0A0E17;
+  --color-text: #E9E4D8;
+  --color-text-dark: #E9E4D8;
+  --color-text-light: #E9E4D8;
+  --color-text-light-1: #8A93A6;
+  --color-text-light-2: #8A93A6;
+  --color-text-light-3: #8A93A6;
+  --color-primary: #F2B544;
+  --color-primary-contrast: #0F1420;
+  --color-primary-dark-1: #F2B544;
+  --color-primary-light-1: #F2B544;
+  --color-primary-alpha-10: #2B2618;
+  --color-primary-alpha-20: #2B2618;
+  --color-secondary: #2F3B52;
+  --color-secondary-dark-1: #6A7893;
+  --color-light-border: #2F3B52;
+  --color-input-background: #0A0E17;
+  --color-input-border: #6A7893;
+  --color-input-border-hover: #F2B544;
+  --color-input-text: #E9E4D8;
+  --color-hover: #1F2839;
+  --color-active: #2B2618;
+  --color-markup-code-block: #0A0E17;
+  --color-markup-code-inline: #0A0E17;
+  --color-code-bg: #0A0E17;
+  --color-console-bg: #0A0E17;
+  --color-console-fg: #E9E4D8;
+  --color-green: #5CC8B8;
+  --color-red: #F0876B;
+  --color-accent: #F2B544;
+  --color-small-accent: #2B2618;
+  --color-diff-added-row-bg: #12312E;
+  --color-diff-removed-row-bg: #3A1E18;
+  --border-radius: 8px;
+  --border-radius-medium: 14px;
+}
+
+/* Action principale : ambre et sur-accent, jamais de blanc sur l’ambre. */
+.ui.primary.button, .ui.primary.buttons .button {
+  background: #F2B544; color: #0F1420;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.45), 0 2px 0 #b9821f, 0 6px 14px rgba(0,0,0,0.4);
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.ui.primary.button:hover { background: #F2B544; color: #0F1420; transform: translateY(-1px); }
+.ui.primary.button:active { transform: translateY(2px); box-shadow: inset 0 2px 4px rgba(0,0,0,0.6), inset 0 -1px 0 rgba(233,228,216,0.05); }
+.ui.segment, .ui.attached.segment, .ui.card, .ui.cards > .card { box-shadow: inset 0 1px 0 rgba(233,228,216,0.07), 0 1px 2px rgba(0,0,0,0.5); }
+.ui.dropdown .menu, .ui.modal, .tippy-box { box-shadow: inset 0 1px 0 rgba(233,228,216,0.1), 0 4px 8px rgba(0,0,0,0.45), 0 24px 48px rgba(0,0,0,0.55); }
+input, textarea, .ui.input input, .ui.form input, .ui.form textarea { box-shadow: inset 0 2px 4px rgba(0,0,0,0.6), inset 0 -1px 0 rgba(233,228,216,0.05); }
+:focus-visible { outline: none; box-shadow: 0 0 0 2px #0f1420, 0 0 0 4px #f2b544 !important; }
+h1, h2, .ui.header, .markup h1, .markup h2 { font-family: Fraunces, Georgia, serif; font-weight: 600; }
+.terminal, .job-step-container { background: #0A0E17; color: #E9E4D8; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

@@ -17,6 +17,9 @@ Détail, symptômes et preuves : `JOURNAL-CORRECTIONS.md`.
 - Documentation : base du chat resynchronisée depuis `main`, outils de `hibou-docs` mis à jour par pull request (B35).
 - Proxmox : connexion par Forgejo opérationnelle (résolution de forge, émetteur exact, rejouée en mise à jour) (B36).
 - Changement de profil : Open WebUI et l'évaluation suivent automatiquement doc et dev (B37) ; sauvegarde manuelle comptée (B38).
+- Sauvegarde : une sauvegarde manuelle de forge met aussi la métrique à jour (B38).
+- Supervision : **connexion à Grafana par Forgejo réparée** (autorité Hibou conservée à chaque mise à jour), accueil sur le tableau Hibou (B39).
+- Charte : CSS d'Open WebUI 0.13 enfin chargé (nuit et brume, contrastes du thème clair), page « Accès réservé », recherche du site docs lisible (B40, B41).
 - Chat : **les comptes non administrateurs peuvent enfin utiliser les modèles Hibou** (droits Open WebUI 0.13, B31) ;
   **export Word, PDF, PowerPoint, Excel** téléchargeable dans la conversation (B32) ; **compression automatique** des longues conversations (B33) ;
   publication au nom de la personne, branche `redaction/<personne>/…` (B34).

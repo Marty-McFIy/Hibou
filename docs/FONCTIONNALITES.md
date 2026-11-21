@@ -57,7 +57,7 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Documentation interne | Modèle qui répond à partir de la documentation fusionnée, avec ses sources | Validé |
 | Compression du contexte | Une conversation trop longue est résumée automatiquement au lieu d’échouer ; les derniers messages restent intacts | Validé |
 | Espace personnel | Conversations et fichiers propres à chaque compte : personne ne voit ceux des autres | Validé |
-| Charte Hibou | Thème, logo, écran de démarrage, suggestions, modèle par défaut | Validé |
+| Charte Hibou | Thème nuit et brume, polices, logo, écran de démarrage, suggestions, modèle par défaut ; contrastes AA dans les deux thèmes | Validé (textes d’Open WebUI au vouvoiement) |
 
 ## 5. Agent de code (OpenCode, `code.<domaine>`)
 
@@ -95,5 +95,4 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 ## 8. Ce qui reste à faire
 
 - Valider sur du vrai matériel les profils au-delà de 4 Go, le décodage spéculatif et la génération d’images.
-- Contrôler toute l’interface contre la charte (captures PC et téléphone).
 - Mesurer les durées sur disques SSD et le passage à plusieurs cartes.

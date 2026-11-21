@@ -1,0 +1,4 @@
+/* Hibou Auto — suit le réglage clair ou sombre du poste. */
+@import url("./theme-hibou-nuit.css") (prefers-color-scheme: dark);
+@import url("./theme-hibou-brume.css") (prefers-color-scheme: light);
+gitea-theme-meta-info { --theme-display-name: "Hibou Auto"; }

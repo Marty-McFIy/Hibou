@@ -25,3 +25,5 @@
 .md-typeset h1, .md-typeset h2 { font-family: Fraunces, Georgia, serif; font-weight: 600; }
 .md-typeset pre > code { background: #0A0E17; color: #E9E4D8; }
 .md-typeset img[src$=".svg"] { background: #FBF8F1; border-radius: 8px; padding: 12px; }
+/* Champ de recherche : texte indicatif sur la barre (filet), 3,6:1 avec texte-doux ; texte plein pour passer 4,5:1. */
+.md-search__input::placeholder { color: var(--texte); opacity: 0.85; }

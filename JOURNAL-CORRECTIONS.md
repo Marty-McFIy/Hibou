@@ -399,6 +399,59 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
   6 comptes, 4 dépôts, `main` de hibou-docs avec la fusion de la PR n° 8 ; Open WebUI : 3 utilisateurs, 10 modèles, 11 conversations, 40 fichiers, 2 bases, 2 outils, 1 filtre ;
   espace OpenCode d'alice présent. Puis arrêtée et supprimée (`qm destroy 299 --purge`). **Prouvé.**
 
+## Phase 6.3 — Sauvegarde ; B38 — une sauvegarde manuelle ne met pas la métrique à jour
+- `vzdump 210 --storage hibou-sauvegardes --mode snapshot` : `fs-freeze` puis `fs-thaw` par l'agent invité, 80 Gio lus en 135 s, archive 24 Go (sans compression : défaut de vzdump), 2 min 17 s.
+  Avec `--compress zstd` : 14,5 Go, 2 min 40 s. La tâche planifiée de 3 h a bien tourné la nuit précédente (métrique à 03:02).
+- B38 : la métrique `hibou_sauvegarde_derniere_reussite_timestamp` ne bouge pas après une sauvegarde manuelle : le crochet n'est attaché qu'à la tâche planifiée ;
+  et la configuration de sauvegarde n'était pas rejouée en mise à jour.
+  Diff : fonction `sauvegarde_forge` (tâche, crochet) rejouée en mise à jour de forge ; crochet limité à la VM forge (sinon une autre VM sauvegardée une fois déclencherait l'alerte « plus de 26 h ») ;
+  `script:` global dans `/etc/vzdump.conf` de l'hôte s'il n'y en a pas déjà un (sinon note, rien n'est écrasé).
+  Test : `mettre-a-jour forge` n° 42, puis `vzdump 210 … --compress zstd` : fichier de métrique à l'heure exacte de la fin, relevé par Prometheus (`job noeuds`). **Prouvé.**
+
+## Phase 6.4 — Restauration
+- `qmrestore` de l'archive zstd vers la VM 299 (`--unique 1`, stockage des VM) : 7 min 41 s ; renommée `hibou-restauration`, `onboot 0`, carte réseau coupée (`link_down=1`, même adresse que forge).
+- Démarrée : agent invité prêt en 20 s, 14 conteneurs relancés ; Forgejo `/api/healthz` 200, Open WebUI `{"status":true}` ;
+  6 comptes, 4 dépôts, `main` de hibou-docs avec la fusion de la PR n° 8 ; Open WebUI : 3 utilisateurs, 10 modèles, 11 conversations, 40 fichiers, 2 bases, 2 outils, 1 filtre ;
+  espace OpenCode d'alice présent. Puis arrêtée et supprimée (`qm destroy 299 --purge`). **Prouvé.**
+
+## Phase 5 — Charte graphique (captures Playwright, PC 1440 px et téléphone 390 px, thèmes sombre et clair)
+- Outil : Playwright + Chromium sur l'hôte d'essai (seul à joindre le réseau isolé), connexion réelle d'un utilisateur par Forgejo.
+  Captures avant : `captures/avant/{pc-sombre,pc-clair,tel-sombre}` ; après : `captures/apres/{pc-sombre,pc-clair,tel-sombre,tel-clair}` (14 écrans chacun, plus la page d'erreur de Caddy).
+- Conformes dès l'origine : Forgejo (thème nuit, logo, favicon, Fraunces, Inter), site docs (nuit et brume, bascule), terminal (5 couleurs identiques aux jetons, symbole,
+  207 messages sans vouvoiement ni point d'exclamation), contrastes des jetons (toutes les paires ≥ 4,5:1, filets ≥ 3:1, dans les deux thèmes).
+- Pas de page oauth2-proxy à habiller : `code.` et `docs.` vont directement au formulaire Forgejo.
+
+## B39 — Connexion à Grafana par Forgejo impossible depuis la première mise à jour (« certificate signed by unknown authority »)
+- Symptôme : alice, « Sign in with Hibou · Forge » → « Login failed : Failed to get token from provider » ; Grafana : `x509: certificate signed by unknown authority` vers forge.
+- Cause : `supervision()`, rejouée à chaque mise à jour, faisait `cp ca-certificates.crt /srv/supervision/ca.crt` et effaçait l'autorité Hibou que seul `configurer` (installation) ajoutait :
+  120 certificats au lieu de 121. Grafana et Uptime Kuma ne font plus confiance à forge après la première mise à jour.
+- Diff : `ca.crt` = paquet système + autorité Hibou dans `supervision()` ; Grafana : `SSL_CERT_FILE`, connexion automatique par Forgejo (`GF_AUTH_OAUTH_AUTO_LOGIN`, la page
+  « Welcome to Grafana » n'est pas personnalisable en version libre), accueil sur « Hibou · Vue d'ensemble », pas de fil d'actualités de grafana.com ;
+  réglages ajoutés à `grafana.env` en mise à jour sans le réécrire (il porte les secrets OAuth).
+- Test : `mettre-a-jour forge` n° 45 : 121 certificats, `curl` depuis Grafana vers forge : 200 ; captures : alice connectée, accueil sur le tableau Hibou. **Prouvé.**
+
+## B40 — Chat : la charte Open WebUI n'est pas chargée (fond gris, blanc en thème clair)
+- Symptôme : chat en gris neutre (`#171717`), blanc en clair, écran de connexion noir pur ; `/static/custom.css` : 200 mais **0 octet**.
+- Cause : Open WebUI 0.13 sert `/static/custom.css` depuis `/app/build/static/` ; le script montait la charte dans `/app/backend/open_webui/static/`.
+  Puis : calques `bg-black`/`bg-white` purs (écran de connexion), et gris secondaire Nuit (`#8A93A6`) réutilisé en clair : 2,4 à 2,9:1 sur brume (1,7:1 pour certaines étiquettes).
+- Diff : montage sur `/app/build/static/custom.css` ; `--color-black` = fond Nuit, `--color-white` = fond Brume ; en clair, gris 400 et 500 = texte-doux Brume (6:1).
+  Générateur `charte/generer-themes.py` et CSS généré alignés (le générateur n'est pas relancé ici : chemins de l'environnement de création, il vide sa sortie).
+- Test : `mettre-a-jour forge` n° 46 et 47 ; captures : chat nuit (PC, téléphone), brume en clair, connexion nuit ; mesure des contrastes sur les textes affichés : 0 texte sous le seuil
+  dans le chat (hors couleurs `oklab`/`oklch`, que le script de mesure ne lit pas). **Prouvé.**
+
+## B41 — Refus d'accès bruts et petits écarts de lisibilité
+- `etat.` et `alertes.` (groupe owners) : alice recevait « Forbidden » en texte brut d'oauth2-proxy. Diff : `@interdit status 403` → `error 403` dans le bloc `sso` ;
+  page d'erreur Caddy à la charte avec un texte « Accès réservé » pour 403 (« Ce service ne répond pas » sinon). Test : captures « Accès réservé » ; arrêt d'Open WebUI : « Ce service ne répond pas » (502). **Prouvé.**
+- Site docs : texte indicatif de la recherche à 3,6:1 → texte plein à 85 %. Le CSS du site vit dans hibou-docs : `docs/assets` ajouté à la pull request d'outils (PR n° 9 mise à jour), effectif après sa fusion.
+
+## Écarts de charte non corrigés (décision ou limite)
+- Open WebUI : « Connectez-vous à Hibou (Open WebUI) » : la mention « (Open WebUI) » est imposée par sa licence ; textes français au vouvoiement (« Comment puis-je vous aider aujourd'hui ? »),
+  compilés dans des fichiers JavaScript au nom changeant à chaque version : non modifiés (bricolage fragile).
+- Open WebUI, thème clair : blocs de code dessinés par l'éditeur intégré, restés clairs (la charte veut le terminal nuit dans les deux thèmes).
+- OpenCode web : thèmes intégrés seulement, choisis et gardés par navigateur (`opencode-theme-id`) ; le thème `hibou` ne vaut que pour le terminal (TUI).
+- Grafana (page de connexion contournée, voir B39), Uptime Kuma et ntfy : pas de personnalisation dans leurs versions libres ;
+  Uptime Kuma permet un CSS et un logo sur ses pages de statut publiques seulement (à configurer dans son interface si on en publie une).
+
 ## Constats sur les agents (doc et dev), profil ≥ 4 Go
 - Où vont les fichiers : **dev** (OpenCode, conteneur sur forge) écrit dans `/workspace/<projet>` = `/srv/workspace/<projet>` de la VM forge (uid 1000), un clone par projet.
   **doc** (Open WebUI) n'écrit aucun fichier : l'outil dépose le document par l'API de Forgejo, directement dans hibou-docs (`docs/<dossier>/<nom>.md`).

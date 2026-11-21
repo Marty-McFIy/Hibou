@@ -1718,7 +1718,9 @@ EOF
 
 supervision() {
   install -d /srv/supervision/prometheus /srv/supervision/grafana/datasources /srv/supervision/grafana/dashboards /srv/supervision/metriques
-  cp /etc/ssl/certs/ca-certificates.crt /srv/supervision/ca.crt
+  # Paquet système + autorité Hibou : supervision() est rejouée à chaque mise à jour ; une simple copie du paquet
+  # système effaçait l’autorité (ajoutée par « configurer », à l’installation seulement) et Grafana ne joignait plus forge.
+  cat /etc/ssl/certs/ca-certificates.crt $([[ -f /srv/supervision/hibou-ca.crt ]] && echo /srv/supervision/hibou-ca.crt) > /srv/supervision/ca.crt
   cat > /srv/supervision/prometheus/prometheus.yml <<EOF
 global: { scrape_interval: 30s, evaluation_interval: 30s }
 alerting: { alertmanagers: [{ static_configs: [{ targets: ["alertmanager:9093"] }] }] }
@@ -2121,6 +2123,11 @@ installer_forge() {
 		handle_response @anonyme {
 			redir * /oauth2/sign_in?rd={scheme}://{host}{uri}
 		}
+		# Compte hors des groupes admis : page Hibou « Accès réservé » au lieu du « Forbidden » d’oauth2-proxy.
+		@interdit status 403
+		handle_response @interdit {
+			error 403
+		}
 	}
 }
 forge.$DOMAINE {
@@ -2228,7 +2235,7 @@ services:
       - open-webui:/app/backend/data
       - /srv/hibou/owui-py:/app/hibou-py:ro
       - /srv/hibou/ca-bundle.crt:/etc/hibou/ca-bundle.crt:ro
-      - /srv/hibou/charte/open-webui/custom.css:/app/backend/open_webui/static/custom.css
+      - /srv/hibou/charte/open-webui/custom.css:/app/build/static/custom.css:ro   # Open WebUI 0.13 sert /static/custom.css depuis build/static
       - /srv/hibou/charte/open-webui/hibou:/app/backend/open_webui/static/hibou:ro
       # shortcut: Open WebUI recopie ses icônes depuis /app/build/static au démarrage ; on remplace la source. À revérifier à chaque version.
       - /srv/hibou/charte/open-webui/static/favicon.png:/app/build/static/favicon.png:ro
@@ -2340,6 +2347,12 @@ EOF
   fi
   if [[ -n "${HIBOU_MAJ:-}" ]]; then
     consignes_agent   # les consignes de l’agent changent avec la version ; « configurer » n’est pas rejoué en mise à jour
+    # Réglages de Grafana ajoutés depuis l’installation : complétés sans réécrire le fichier (il porte les secrets OAuth).
+    local reglage
+    for reglage in SSL_CERT_FILE=/etc/hibou/ca.crt GF_AUTH_OAUTH_AUTO_LOGIN=true GF_NEWS_NEWS_FEED_ENABLED=false \
+        GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/hibou.json; do
+      [[ ! -f /srv/supervision/grafana.env ]] || grep -q "^${reglage%%=*}=" /srv/supervision/grafana.env || echo "$reglage" >> /srv/supervision/grafana.env
+    done
     demarrer /srv/forgejo --force-recreate
     ADMIN="$HIBOU_ADMIN_NOM"; MDP="$HIBOU_ADMIN_MDP"
     etape "Open WebUI : modèles rebranchés sur les modèles installés"
@@ -2448,9 +2461,11 @@ p { color: var(--texte-doux); margin: .25rem 0; }
 </head>
 <body><main>
 <div class="symbole" aria-hidden="true">{{include "/symbole-sur-nuit.svg"}}</div>
-<h1>Ce service ne répond pas</h1>
-<p>Erreur <code>{{placeholder "http.error.status_code"}}</code> sur <code>{{.Host}}</code>.</p>
-<p>Il démarre peut-être encore. Réessaie dans une minute ; sinon, regarde https://supervision.</p>
+{{$code := print (placeholder "http.error.status_code")}}{{if eq $code "403"}}<h1>Accès réservé</h1>
+<p>Ton compte n’est pas dans un groupe autorisé pour <code>{{.Host}}</code>.</p>
+<p>Demande l’accès à l’administrateur de Hibou.</p>{{else}}<h1>Ce service ne répond pas</h1>
+<p>Erreur <code>{{$code}}</code> sur <code>{{.Host}}</code>.</p>
+<p>Il démarre peut-être encore. Réessaie dans une minute ; sinon, regarde https://supervision.</p>{{end}}
 </main></body>
 </html>
 HTML
@@ -2750,8 +2765,8 @@ outils_par_pr() {  # dépôt dossier_amorce
   api GET "/repos/hibou/$1/pulls?state=open" | jq -e --arg b "$b" 'any(.[]; .head.ref == $b)' >/dev/null && ouverte=1
   tmp=$(mktemp -d)
   git -c http.extraHeader="$auth" clone -q "http://127.0.0.1:3000/hibou/$1.git" "$tmp/d" || { rm -rf "$tmp"; return 1; }
-  for p in outils .forgejo templates .markdownlint-cli2.yaml; do
-    [[ -e "$2/$p" ]] && cp -a "$2/$p" "$tmp/d/"
+  for p in outils .forgejo templates .markdownlint-cli2.yaml docs/assets; do   # docs/assets : charte du site
+    [[ -e "$2/$p" ]] && install -d "$tmp/d/$(dirname "$p")" && cp -a "$2/$p" "$tmp/d/$(dirname "$p")/"
   done
   if [[ -n "$(git -C "$tmp/d" status --porcelain)" ]]; then
     git -C "$tmp/d" checkout -qB "$b"
@@ -2954,6 +2969,13 @@ GF_AUTH_GENERIC_OAUTH_AUTH_URL=https://forge.$DOMAINE/login/oauth/authorize
 GF_AUTH_GENERIC_OAUTH_TOKEN_URL=https://forge.$DOMAINE/login/oauth/access_token
 GF_AUTH_GENERIC_OAUTH_API_URL=https://forge.$DOMAINE/login/oauth/userinfo
 GF_AUTH_GENERIC_OAUTH_TLS_CLIENT_CA=/etc/hibou/ca.crt
+# Paquet d’autorités aussi pour le client HTTP général de Grafana (Go lit SSL_CERT_FILE).
+SSL_CERT_FILE=/etc/hibou/ca.crt
+# Connexion directe par Forgejo (page à la charte) ; formulaire local de secours : /login?disableAutoLogin
+GF_AUTH_OAUTH_AUTO_LOGIN=true
+# Accueil sur le tableau Hibou, sans le fil d’actualités de grafana.com (hors ligne : rien à afficher).
+GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/hibou.json
+GF_NEWS_NEWS_FEED_ENABLED=false
 GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH=contains(groups[*], 'hibou:owners') && 'Admin' || 'Viewer'
 GF_AUTH_GENERIC_OAUTH_ALLOWED_GROUPS=hibou:owners,hibou:dev,hibou:doc
 GF_AUTH_GENERIC_OAUTH_GROUPS_ATTRIBUTE_PATH=groups

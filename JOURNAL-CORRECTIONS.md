@@ -202,10 +202,42 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 - Diff : outil créé ou mis à jour (`/tools/id/publier_forgejo/update`) à chaque passage ; valves (jeton de hibou-redac) écrites seulement à l'installation.
 - Test : `mettre-a-jour forge` n° 21 : `normaliser` présent dans l'outil, jeton conservé, dépôt `hibou/hibou-docs`. **Prouvé** (puis PR n° 3 ci-dessus).
 
+## B21 — `mettre-a-jour forge` ne met jamais à jour « Documentation interne » ni les modèles techniques (erreur masquée)
+- Symptôme : journal d'Open WebUI à chaque mise à jour : 8 × `POST /api/v1/models/create` → 401 ; table `model` : `hibou-documentation`, `qwen3-embedding`, `fim` figés à la date d'installation.
+- Cause : Open WebUI répond 401 quand l'identifiant existe déjà ; ces trois créations finissaient par `|| true` (pas de mise à jour). Après un changement de profil doc, « Documentation interne » resterait branchée sur le modèle retiré.
+- Diff : fonction `modele_owui` (création, sinon `/models/model/update?id=…`) pour les 8 modèles ; plus de `|| true` : un échec remonte en note (« Open WebUI n'a pas tout accepté »).
+- Test : `mettre-a-jour forge` n° 22 : 8 × 401 puis 8 × `update` 200 ; les 8 lignes de `model` datées de la mise à jour. **Prouvé.**
+
+## B22 — Agent dev : `main` non protégée dans les dépôts qu'il crée ; `.venv` à la racine de /workspace ; `rm -rf .git` seulement « à demander »
+- Constats : `hibou-infra`, `hibou-docs` et `hibou-eval` sont protégés, mais pas les dépôts créés par `forgejo-nouveau-depot` (l'agent en est administrateur) ; seule la règle OpenCode `git push*main*` bloquait, et un `git push` nu depuis main passait.
+  Essai web n° 4 : `.venv` de 25 Mo créé à la racine de /workspace avant le clone. Même essai : `rm -rf .git` proposé (permission « ask »).
+- Diff : `forgejo-nouveau-depot` pose la même protection que les dépôts système, plus `apply_to_admins` (l'agent ne peut pas fusionner sa propre PR sans approbation), message clair si elle est refusée ;
+  `AGENTS.md` : « Rien à la racine de /workspace… `cd /workspace/<projet>` avant toute autre commande » ; permissions : `rm -r… .git` refusé (4 motifs).
+- Test : `mettre-a-jour forge` n° 22 : dépôt d'essai créé par la commande → protection `enable_push:false, required_approvals:1, apply_to_admins:true` ; `git push` nu depuis main : `pre-receive hook declined` ; second appel : « Déjà cloné ».
+  Motifs simulés (dernière règle qui correspond) : `rm -rf .git`, `cd … && rm -rf .git`, `rm -rf /workspace/p/.git`, `rm -r .git/` refusés ; `rm -rf .venv`, `rm .gitignore`, `git rm -r --cached` restent « ask ».
+  Non rejoué par le modèle lui-même (serveur dev arrêté pendant l'essai). **Prouvé** pour la protection.
+- Constat utile : le jeton de l'agent reçoit 403 en suppression de dépôt.
+
+## B23 — Relecteur muet quand il échoue
+- Symptôme : aucune PR de hibou-docs n'a d'avis ; journal du relecteur : `échec de la relecture : <urlopen error [Errno 113] No route to host>` (il appelle le LLM de dev, arrêté pendant l'essai faute de seconde carte).
+- Cause : l'échec n'est écrit que dans le journal du conteneur ; dans Forgejo, la PR semble « pas encore relue ».
+- Diff : en cas d'échec, avis `COMMENT` « Relecture automatique impossible : … La relecture humaine reste nécessaire. » par `/reviews`
+  (premier essai par `/issues/{n}/comments` : 403, l'équipe relecture n'a que `repo.code` et `repo.pulls` en lecture ; `/reviews` : 200).
+- Test : `mettre-a-jour forge` n° 23, PR jetable n° 7 : avis de hibou-relecteur avec le message. **Prouvé.** L'avis réel (dev en marche) reste à voir.
+
+## A2 — Profils au-delà de 4 Go : deux ne tiennent pas dans leur palier (tailles réelles sur Hugging Face, 2026-11-21)
+- Simulation du menu (Entrée = profil conseillé) de 4 à 96 Go, une ou plusieurs cartes : chaque taille tombe sur le bon palier.
+- Poids sur la carte (fichiers réels) : `dev:2` (≥ 48 Go) Qwen3-Coder-Next UD-Q4_K_XL = **49,6 Go** ; `doc:2` (≥ 24 Go) Gemma 4 26B UD-Q6_K_XL + mmproj = **24,5 Go**, avant le cache.
+  `dev:3` (≥ 24 Go) : 27B Q4 + mmproj + complétion 3B = 21,9 Go + cache 64k : limite, à mesurer. `dev:4`/`doc:3` (≥ 12 Go) : 6 à 7,6 Go, confortables.
+- Diff : `dev:2` Coder-Next en UD-Q3_K_XL (36,3 Go) ; `doc:2` Gemma en UD-Q4_K_XL (17 + 1,2 Go) ; libellés du menu alignés (dont `dev:5` : 32k, complétion sur le processeur).
+  Complétion 7B (`dev:1`, `dev:2`) : motif `*q8_0*` → `*q8_0.gguf` : le dépôt contient le même modèle en un fichier et en trois morceaux, les deux étaient téléchargés (8 Go en double).
+- Test : `autotest` (22 lignes). Non mesurable sur la machine d'essai (une carte de 4 Go) : à valider sur le premier serveur de 24 ou 48 Go.
+- Non corrigé : `*mmproj*F16*` prend aussi `mmproj-BF16` (deux projecteurs téléchargés, ~0,7 à 1,2 Go) ; c'est le BF16 qui est chargé et validé à l'essai (processeur sans F16C) : changement non testé.
+
 ## Constats sur les agents (doc et dev), profil ≥ 4 Go
 - Où vont les fichiers : **dev** (OpenCode, conteneur sur forge) écrit dans `/workspace/<projet>` = `/srv/workspace/<projet>` de la VM forge (uid 1000), un clone par projet.
   **doc** (Open WebUI) n'écrit aucun fichier : l'outil dépose le document par l'API de Forgejo, directement dans hibou-docs (`docs/<dossier>/<nom>.md`).
-- Quand ça pousse : jamais à chaque étape. dev : un commit puis `forgejo-pr` (push de la branche `agent/<sujet>` + PR) quand le travail est fini ; jamais sur main (refusé).
+- Quand ça pousse : jamais à chaque étape. dev : un commit puis `forgejo-pr` (push de la branche `agent/<sujet>` + PR) quand le travail est fini ; jamais sur main (refusé par Forgejo depuis B22).
   doc : une branche `redaction/<chemin>-<date>` + un commit + une PR par document, seulement après validation par l'utilisateur (le prompt le demande).
 - La fusion reste humaine dans les deux cas ; le runner vérifie les PR de hibou-docs.
 - Limites du 4B (pas du script) : adresses inventées, boucles sur une commande en échec, `rm -rf .git` proposé (refusable dans l'interface), tests parfois vides.

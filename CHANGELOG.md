@@ -11,6 +11,9 @@ Détail, symptômes et preuves : `JOURNAL-CORRECTIONS.md`.
 - Évaluation : une erreur d'API compte 0 et est signalée (N4).
 - Agent OpenCode : sortie réservée = contexte / 4 (B17 : il compactait à chaque tour) ; `dev:5` en contexte 32k ; `pytest` dans l'image,
   consignes « Hors ligne », commandes `forgejo-nouveau-depot` et `forgejo-pr`, refus immédiats (`apt`, `su`, `--index-url`…), consignes rejouées en mise à jour (B18).
+- Open WebUI : les 8 modèles (dont « Documentation interne ») sont créés ou mis à jour, sans `|| true` (B21).
+- Agent dev : `main` protégée dans chaque dépôt qu'il crée, rien à la racine de /workspace, `rm -r … .git` refusé (B22) ; le relecteur signale ses échecs dans la PR (B23).
+- Profils : `dev:2` en Coder-Next Q3 et `doc:2` en Gemma Q4 pour tenir dans 48 et 24 Go, complétion 7B téléchargée une seule fois (A2).
 - Rédaction : `publier_forgejo` 0.2.0 met le Markdown aux règles du runner avant publication (B19) ; l'outil est mis à jour à chaque `mettre-a-jour forge` (B20).
 
 ## 0.1.0

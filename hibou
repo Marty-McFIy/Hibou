@@ -68,13 +68,13 @@ GPUS=("RTX 6000 Ada|48" "RTX PRO 6000 Blackwell|96" "L40S|48" "RTX A6000|48" "RT
 # Un seul utilisateur par serveur : -np 1 donne tout le contexte à la requête en cours,
 # et le cache KV en q8_0 divise sa taille par deux. Tailles approchées, à valider avec hibou-eval.
 PROFILS_DEV=("≥ 90 Go : Qwen3-Coder-Next Q6 (256k) ou Qwen3.8 27B Q8 (128k), complétion 7B toujours chargée"
-             "≥ 48 Go : Qwen3-Coder-Next Q4 (64k) ou Qwen3.8 27B Q8 (128k) + complétion 7B"
+             "≥ 48 Go : Qwen3-Coder-Next Q3 (64k) ou Qwen3.8 27B Q8 (128k) + complétion 7B"
              "≥ 24 Go : Qwen3.8 27B Q4 (64k) + complétion 3B"
              "≥ 12 Go : Qwen3.5 9B Q4 (64k) + complétion 1.5B"
-             "≥ 4 Go : Qwen3.5 4B Q4 (16k) + complétion 1.5B")
+             "≥ 4 Go : Qwen3.5 4B Q4 (32k) + complétion 1.5B sur le processeur")
 PROFILS_DEV_GO=(90 48 24 12 4)
 PROFILS_DOC=("≥ 48 Go : Gemma 4 26B Q8 (128k) ou Qwen3.8 27B Q8 (128k), vision, embeddings"
-             "≥ 24 Go : Gemma 4 26B Q6 (64k) ou Qwen3.8 27B Q4 (32k), vision, embeddings"
+             "≥ 24 Go : Gemma 4 26B Q4 (64k) ou Qwen3.8 27B Q4 (32k), vision, embeddings"
              "≥ 12 Go : Qwen3.5 9B Q4 (32k), embeddings"
              "≥ 4 Go : Qwen3.5 4B Q4 (8k), vision, embeddings sur le processeur")
 PROFILS_DOC_GO=(48 24 12 4)
@@ -86,13 +86,13 @@ profil() {  # rôle numéro → MODELES_ROLE, GROUPES, PRINCIPAL
     dev:1) MODELES_ROLE=(
         "qwen3-coder-next|unsloth/Qwen3-Coder-Next-GGUF|*UD-Q6_K_XL*|262144|--cache-reuse 256"
         "qwen3.8-27b|unsloth/Qwen3.8-27B-GGUF|*UD-Q8_K_XL*,*mmproj*F16*|131072|--cache-reuse 256"
-        "fim|Qwen/Qwen2.5-Coder-7B-Instruct-GGUF|*q8_0*|16384|")
+        "fim|Qwen/Qwen2.5-Coder-7B-Instruct-GGUF|*q8_0.gguf|16384|")
       GROUPES="  principal: { swap: true, exclusive: false, members: [qwen3-coder-next, qwen3.8-27b] }
   completion: { persistent: true, swap: false, exclusive: false, members: [fim] }" ;;
     dev:2) MODELES_ROLE=(
-        "qwen3-coder-next|unsloth/Qwen3-Coder-Next-GGUF|*UD-Q4_K_XL*|65536|--cache-reuse 256"
+        "qwen3-coder-next|unsloth/Qwen3-Coder-Next-GGUF|*UD-Q3_K_XL*|65536|--cache-reuse 256"   # Q4 : 49,6 Go de poids, plus que 48 Go
         "qwen3.8-27b|unsloth/Qwen3.8-27B-GGUF|*UD-Q8_K_XL*,*mmproj*F16*|131072|--cache-reuse 256"
-        "fim|Qwen/Qwen2.5-Coder-7B-Instruct-GGUF|*q8_0*|8192|")
+        "fim|Qwen/Qwen2.5-Coder-7B-Instruct-GGUF|*q8_0.gguf|8192|")
       GROUPES="  code: { swap: false, exclusive: true, members: [qwen3.8-27b, fim] }" ;;
     dev:3) MODELES_ROLE=(
         "qwen3.8-27b|unsloth/Qwen3.8-27B-GGUF|*UD-Q4_K_XL*,*mmproj*F16*|65536|--cache-reuse 256"
@@ -111,7 +111,7 @@ profil() {  # rôle numéro → MODELES_ROLE, GROUPES, PRINCIPAL
         "qwen3.8-27b|unsloth/Qwen3.8-27B-GGUF|*UD-Q8_K_XL*,*mmproj*F16*|131072|" "$emb")
       GROUPES="$rag" ;;
     doc:2) MODELES_ROLE=(
-        "gemma-4-26b|unsloth/gemma-4-26B-A4B-it-GGUF|*UD-Q6_K_XL*,*mmproj*F16*|65536|"
+        "gemma-4-26b|unsloth/gemma-4-26B-A4B-it-GGUF|*UD-Q4_K_XL*,*mmproj*F16*|65536|"   # Q6 + vision : 24,5 Go, plus que 24 Go
         "qwen3.8-27b|unsloth/Qwen3.8-27B-GGUF|*UD-Q4_K_XL*,*mmproj*F16*|32768|" "$emb")
       GROUPES="$rag" ;;
     doc:3) MODELES_ROLE=("qwen3.5-9b|unsloth/Qwen3.5-9B-GGUF|*UD-Q4_K_XL*|32768|" "$emb")
@@ -707,6 +707,12 @@ def relire(depot, numero, titre):
         print(f"{depot}#{numero} relue", flush=True)
     except Exception as x:  # un échec ne doit jamais bloquer le webhook ni le serveur
         print(f"{depot}#{numero} : échec de la relecture : {x}", flush=True)
+        try:  # sans ce mot, la pull request semble simplement « pas encore relue »
+            # Par /reviews comme l’avis : l’équipe relecture n’a pas le droit de commenter une issue (403).
+            http("POST", f"{api}/reviews", e["JETON"], {"event": "COMMENT",
+                 "body": f"Relecture automatique impossible : {x}. Le serveur dev est peut-être arrêté. La relecture humaine reste nécessaire."})
+        except Exception as y:
+            print(f"{depot}#{numero} : commentaire d’échec refusé : {y}", flush=True)
     finally:
         with verrou:
             en_cours.discard((depot, numero))
@@ -865,6 +871,12 @@ jq -n --arg n "$p" '{name:$n, private:true, auto_init:true, default_branch:"main
     "$FORGEJO_URL/api/v1/orgs/$FORGEJO_ORG/repos" 2>/dev/null \
   || echo "Le dépôt existe déjà dans Forgejo : je le clone."
 git clone -q "git@${FORGEJO_URL#https://}:$FORGEJO_ORG/$p.git" "$d"
+# main protégée comme hibou-infra/docs/eval : sans elle, un « git push » depuis main passerait (l'agent est administrateur du dépôt qu'il crée).
+r="$FORGEJO_URL/api/v1/repos/$FORGEJO_ORG/$p/branch_protections"
+curl -fsS -o /dev/null -H "Authorization: token $FORGEJO_TOKEN" "$r/main" 2>/dev/null \
+  || curl -fsS -o /dev/null -H "Authorization: token $FORGEJO_TOKEN" -H 'Content-Type: application/json' "$r" \
+       -d '{"rule_name":"main","enable_push":false,"required_approvals":1,"block_on_rejected_reviews":true,"dismiss_stale_approvals":true,"apply_to_admins":true}' \
+  || echo "Attention : main n'a pas pu être protégée. Préviens la personne qui t'a demandé le projet." >&2
 if [ -n "$ancien" ]; then
   (cd "$ancien" && tar --exclude=./.git -cf - .) | (cd "$d" && tar -xf -)
   echo "Tes fichiers de $ancien sont recopiés dans le clone, sans commit. L'ancien dossier reste en place : ne t'en sers plus."
@@ -2332,7 +2344,7 @@ Tu travailles pour Hibou, une IA locale et hors ligne. Rien ne sort de ce résea
 - Quand tu n'es pas sûr, pose une seule question précise.
 
 ## Forgejo (https://forge.$DOMAINE, organisation hibou)
-Les projets vivent dans /workspace/<projet>. Tu es le compte hibou-dev. Jeton : \$FORGEJO_TOKEN.
+Les projets vivent dans /workspace/<projet>. Rien à la racine de /workspace : ni fichier, ni .venv, ni git init. Fais \`cd /workspace/<projet>\` avant toute autre commande. Tu es le compte hibou-dev. Jeton : \$FORGEJO_TOKEN.
 
 Forgejo a une seule adresse : https://forge.$DOMAINE (\$FORGEJO_URL). Aucun autre nom n'existe.
 
@@ -2539,7 +2551,8 @@ config_opencode() {  # modèles du serveur dev, avec leurs vraies limites de con
     provider: {hibou: {npm: "@ai-sdk/openai-compatible", name: "Hibou", options: {baseURL: $u, apiKey: $k}, models: $m}},
     permission: {edit: "allow", bash: {"*": "ask", "git status*": "allow", "git diff*": "allow", "git log*": "allow",
       "ls*": "allow", "cat*": "allow", "grep*": "allow", "rg*": "allow", "git push*main*": "deny", "sudo*": "deny",
-      "apt*": "deny", "su *": "deny", "*--index-url*": "deny", "*--break-system-packages*": "deny"}}
+      "apt*": "deny", "su *": "deny", "*--index-url*": "deny", "*--break-system-packages*": "deny",
+      "*rm -*r* .git": "deny", "*rm -*r* .git *": "deny", "*rm -*r* .git/*": "deny", "*rm -*r* */.git*": "deny"}}
   }' > /srv/hibou/opencode.json
   chmod 644 /srv/hibou/opencode.json
 }
@@ -2853,6 +2866,12 @@ amorcer_open_webui() {  # bundle jeton_redac
   jeton=$(curl -fsS "$u/auths/signup" -H 'Content-Type: application/json' -d "$ident" 2>/dev/null | jq -r .token) \
     || jeton=$(curl -fsS "$u/auths/signin" -H 'Content-Type: application/json' -d "$ident" | jq -r .token) || return 1
   local h=(-H "Authorization: Bearer $jeton" -H 'Content-Type: application/json')
+  # Modèle lu sur l’entrée : créé, ou mis à jour s’il existe (Open WebUI répond 401 à la création d’un identifiant déjà pris).
+  modele_owui() {
+    local m; m=$(cat)
+    curl -fsS "${h[@]}" "$u/models/create" -d "$m" >/dev/null 2>&1 \
+      || curl -fsS "${h[@]}" "$u/models/model/update?id=$(jq -r .id <<< "$m")" -d "$m" >/dev/null
+  }
   # Outil : créé, ou son code remplacé (une nouvelle version doit atteindre une installation existante).
   local outil; outil=$(jq -n --rawfile c "$1/amorces/open-webui/publier_forgejo.py" \
     '{id:"publier_forgejo",name:"Publier dans Forgejo",content:$c,meta:{description:"Dépose un document dans hibou-docs et ouvre une pull request."}}')
@@ -2895,19 +2914,15 @@ amorcer_open_webui() {  # bundle jeton_redac
     meta:{description:"Répond à partir de la documentation validée de hibou-docs, avec ses sources.",profile_image_url:"/static/hibou/symbole-sur-nuit.svg",
       knowledge:[$kb + {type:"collection"}],capabilities:{citations:true}},
     params:{system:"Tu es Hibou. Tu réponds en français, au tutoiement, calme et précis, sans point d’exclamation ni émoji. Tu réponds uniquement à partir des documents fournis et tu cites la page utilisée. Si la documentation ne contient pas la réponse, dis-le et propose de rédiger la page manquante avec un modèle Hibou de rédaction.",temperature:0.2},
-    is_active:true}' | { curl -fsS "${h[@]}" "$u/models/create" -d @- >/dev/null 2>&1 || true; }
+    is_active:true}' | modele_owui || return 1
 
   # Modèles Hibou rattachés au modèle principal réellement installé sur doc.
   local base; profil doc "$HIBOU_PROFIL_DOC"; base="$PRINCIPAL"
   jq -c --arg b "$base" --argjson kb "$kb" '.[] | .base_model_id = $b | .meta.knowledge = [$kb + {type: "collection"}]' \
-    "$1/amorces/open-webui/modeles-hibou.json" | while read -r m; do
-      curl -fsS "${h[@]}" "$u/models/create" -d "$m" >/dev/null 2>&1 \
-        || curl -fsS "${h[@]}" "$u/models/model/update?id=$(jq -r .id <<< "$m")" -d "$m" >/dev/null
-    done
+    "$1/amorces/open-webui/modeles-hibou.json" | while read -r m; do modele_owui <<< "$m" || exit 1; done || return 1
   # Modèles techniques masqués du sélecteur : embeddings et autocomplétion ne servent pas au chat.
   for m in qwen3-embedding fim; do
-    jq -nc --arg i "$m" '{id:$i,name:$i,base_model_id:null,meta:{},params:{},is_active:false}' \
-      | { curl -fsS "${h[@]}" "$u/models/create" -d @- >/dev/null 2>&1 || true; }
+    jq -nc --arg i "$m" '{id:$i,name:$i,base_model_id:null,meta:{},params:{},is_active:false}' | modele_owui || return 1
   done
   fait "Outil publier_forgejo, 5 modèles Hibou (base $base), base de templates, suggestions et modèle par défaut en place."
 }

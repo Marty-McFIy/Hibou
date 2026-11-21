@@ -848,10 +848,10 @@ telecharger() {
     enregistrer "$nom" "$ref" "$fige"
   done
   # Export PDF (outil exporter_document) : fpdf2 et ses dépendances, prises par le pip de l’image Open WebUI (même Python).
-  if actualiser owui-py || ! ls "$SORTIE/owui-py"/fpdf2-*.whl >/dev/null 2>&1; then
+  if actualiser owui-py || ! ls "$SORTIE/owui-py"/fpdf2-*.whl "$SORTIE/owui-py"/[Bb]rotli-*.whl >/dev/null 2>&1; then
     rm -rf "$SORTIE/owui-py"; install -d "$SORTIE/owui-py"
     docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$SORTIE/owui-py:/o" --entrypoint pip "${IMAGES[open-webui]}" \
-      download -q --no-cache-dir --no-deps -d /o fpdf2 fonttools defusedxml >/dev/null
+      download -q --no-cache-dir --no-deps -d /o fpdf2 fonttools defusedxml brotli >/dev/null   # brotli : polices woff2 de la charte vers TTF
     verrou_ecrire owui-py "$(cd "$SORTIE/owui-py" && ls *.whl | sed 's/-py.*//;s/-cp.*//' | tr '\n' ',' | sed 's/,$//')"
   fi
   note "opencode (construite localement)"

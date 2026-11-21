@@ -444,6 +444,25 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
   page d'erreur Caddy à la charte avec un texte « Accès réservé » pour 403 (« Ce service ne répond pas » sinon). Test : captures « Accès réservé » ; arrêt d'Open WebUI : « Ce service ne répond pas » (502). **Prouvé.**
 - Site docs : texte indicatif de la recherche à 3,6:1 → texte plein à 85 %. Le CSS du site vit dans hibou-docs : `docs/assets` ajouté à la pull request d'outils (PR n° 9 mise à jour), effectif après sa fusion.
 
+## B42 — Application complète de la charte (audit du système de design Hibou)
+- Référence : système de design Hibou (livre de marque, jetons, composants Bouton, Champ, Invite, Terminal, Attente, Logo, Icônes).
+- Conformes : jetons et thèmes Nuit/Brume (Forgejo, chat, docs, pages d'erreur), contrastes, relief et anneau de focus du chat et de Forgejo,
+  terminal (couleurs, symbole), ton (tutoiement, pas de « ! », « hors ligne » état normal) du script, de l'agent, du relecteur et de « Documentation interne ».
+- Écarts corrigés :
+  - **Documents exportés** (`exporter_document` 0.2.0) : polices de la charte (Fraunces, Inter 400/600, JetBrains Mono) converties depuis ses woff2 par fontTools + brotli
+    (brotli ajouté aux modules livrés), mises en cache ; titres en `texte` et Fraunces, code en terminal `nuit`/`brume`, en-têtes de tableau `accent`/`sur-accent`, bords `filet-fort` ;
+    Word : styles Inter/Fraunces, code sur trame nuit ; PowerPoint : thème Nuit (fond nuit, titres Fraunces brume, filet ambre) ; Excel : Inter, en-tête ambre.
+    Test : export réel par le chat en alice, PDF avec `FrauncesSemiBold`, `Inter`, `JetBrainsMonoMedium` embarquées, relu (pptx généré, non relu faute de logiciel de présentation).
+  - **Invite du chat** : au focus, bord `accent-fonce` et `lueur` (composant Invite). Capture : halo d'ambre en sombre et en clair.
+  - **Typographie du chat** : Fraunces débordait sur les étiquettes et descriptions contenues dans les titres ; limitée aux titres. Capture : nom du modèle en Fraunces, description en Inter.
+  - **Site docs** : anneau de focus Hibou, `prefers-reduced-motion` (par la PR d'outils).
+- Pas de défaut, mais à noter : les icônes d'Open WebUI, de Forgejo et de Grafana restent les leurs (la charte veut son jeu de 35 icônes) ; l'attente d'Open WebUI est une animation à points, pas les deux yeux qui clignent.
+
+## B43 — Rédacteurs : vouvoiement dans les documents
+- Constat : procédure exportée « Connectez-vous… Exécutez… Vérifiez… » ; la consigne des 5 rédacteurs ne parlait ni de tutoiement ni de l'infinitif (la charte : tutoiement dans l'interface, libellés à l'infinitif).
+- Diff : consigne « Tu tutoies la personne. Dans les documents, les étapes et consignes sont à l'infinitif, jamais au vouvoiement » ; gabarit Procédure : « verbe à l'infinitif (« Vérifier… », « Lancer… ») ».
+- Test : 3 rédactions après la consigne seule : 1 infinitif, 1 vouvoiement, 1 gabarit vide ; après le gabarit : 2 sur 2 à l'infinitif quand un document est produit, 1 gabarit renvoyé vide (limite du 4B, déjà présente).
+
 ## Écarts de charte non corrigés (décision ou limite)
 - Open WebUI : « Connectez-vous à Hibou (Open WebUI) » : la mention « (Open WebUI) » est imposée par sa licence ; textes français au vouvoiement (« Comment puis-je vous aider aujourd'hui ? »),
   compilés dans des fichiers JavaScript au nom changeant à chaque version : non modifiés (bricolage fragile).

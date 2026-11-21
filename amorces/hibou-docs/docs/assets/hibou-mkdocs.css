@@ -27,3 +27,6 @@
 .md-typeset img[src$=".svg"] { background: #FBF8F1; border-radius: 8px; padding: 12px; }
 /* Champ de recherche : texte indicatif sur la barre (filet), 3,6:1 avec texte-doux ; texte plein pour passer 4,5:1. */
 .md-search__input::placeholder { color: var(--texte); opacity: 0.85; }
+/* Focus clavier : anneau plein, 2 px décollés de 2 px. Mouvement arrêté sur demande du système. */
+:focus-visible { outline: none !important; box-shadow: var(--anneau-focus) !important; border-radius: 2px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

@@ -170,6 +170,8 @@ html, body {{ font-family: {TEXTE}; background: {b["fond"]}; color: {b["texte"]}
 html.dark, html.dark body {{ background: {n["fond"]}; color: {n["texte"]}; }}
 code, pre, kbd, .font-mono {{ font-family: {CODE}; }}
 h1, h2, .text-2xl, .text-3xl {{ font-family: {TITRE}; font-weight: 600; }}
+/* Fraunces pour les titres seulement : étiquettes, boutons et descriptions qu’ils contiennent restent en Inter. */
+:is(h1, h2, .text-2xl, .text-3xl) :is(.text-xs, .text-sm, .text-base, p, button) {{ font-family: {TEXTE}; font-weight: 400; }}
 
 /* Liens et invites : accent-texte, lisible dans les deux thèmes. */
 a {{ color: {b["accent-texte"]}; }}
@@ -183,6 +185,9 @@ html.dark a {{ color: {n["accent-texte"]}; }}
 #chat-input-container, #chat-input {{ box-shadow: {O["brume"]["creux"]}; border-radius: 22px; }}
 html.dark #chat-input-container, html.dark #chat-input {{ box-shadow: {O["nuit"]["creux"]}; }}
 
+/* Invite : bord accent-fonce et lueur quand elle a le focus (Hibou écoute). */
+#chat-input-container:focus-within {{ border-color: #8A5F0A !important; box-shadow: inset 0 2px 4px rgba(15,20,32,0.16), 0 0 0 1px rgba(138,95,10,0.5), 0 0 20px rgba(242,181,68,0.55) !important; }}
+html.dark #chat-input-container:focus-within {{ border-color: #B9821F !important; box-shadow: inset 0 2px 4px rgba(0,0,0,0.6), 0 0 0 1px rgba(242,181,68,0.4), 0 0 24px rgba(242,181,68,0.3) !important; }}
 /* Focus clavier : anneau plein, 2 px décollés de 2 px. */
 :focus-visible {{ outline: none !important; box-shadow: {O["brume"]["anneau-focus"]} !important; }}
 html.dark :focus-visible {{ box-shadow: {O["nuit"]["anneau-focus"]} !important; }}

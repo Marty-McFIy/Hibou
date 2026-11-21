@@ -17,6 +17,7 @@ Détail, symptômes et preuves : `JOURNAL-CORRECTIONS.md`.
 - Documentation : base du chat resynchronisée depuis `main`, outils de `hibou-docs` mis à jour par pull request (B35).
 - Proxmox : connexion par Forgejo opérationnelle (résolution de forge, émetteur exact, rejouée en mise à jour) (B36).
 - Changement de profil : Open WebUI et l'évaluation suivent automatiquement doc et dev (B37) ; sauvegarde manuelle comptée (B38).
+- Charte appliquée au maximum (B42) : documents exportés aux polices et couleurs Hibou (Fraunces, Inter, JetBrains Mono, code en terminal nuit), lueur de l'invite, Fraunces limitée aux titres, focus du site docs ; rédacteurs au tutoiement et étapes à l'infinitif (B43).
 - Sauvegarde : une sauvegarde manuelle de forge met aussi la métrique à jour (B38).
 - Supervision : **connexion à Grafana par Forgejo réparée** (autorité Hibou conservée à chaque mise à jour), accueil sur le tableau Hibou (B39).
 - Charte : CSS d'Open WebUI 0.13 enfin chargé (nuit et brume, contrastes du thème clair), page « Accès réservé », recherche du site docs lisible (B40, B41).

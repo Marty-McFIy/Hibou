@@ -17,7 +17,7 @@ sections: ["Objet", "Prérequis", "Étapes", "Vérification", "Retour arrière"]
 
 ## Étapes
 
-<!-- Liste numérotée. Une action par étape, avec la commande exacte et le résultat attendu. -->
+<!-- Liste numérotée. Une action par étape, verbe à l’infinitif (« Vérifier… », « Lancer… »), avec la commande exacte et le résultat attendu. -->
 
 ## Vérification
 

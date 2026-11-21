@@ -20,7 +20,7 @@ TEMPLATES = [
     ("procedure", "Procédure", "exploitants", [
         ("Objet", "Une ou deux phrases : ce que la procédure permet de faire et quand l’utiliser."),
         ("Prérequis", "Droits, accès, outils et état attendu du système avant de commencer."),
-        ("Étapes", "Liste numérotée. Une action par étape, avec la commande exacte et le résultat attendu."),
+        ("Étapes", "Liste numérotée. Une action par étape, verbe à l’infinitif (« Vérifier… », « Lancer… »), avec la commande exacte et le résultat attendu."),
         ("Vérification", "Comment constater que l’opération a réussi."),
         ("Retour arrière", "Comment annuler, étape par étape, si quelque chose échoue."),
     ]),
@@ -236,7 +236,7 @@ jobs:
 """)
 
 # ─── Open WebUI : un modèle par template ────────────────────────────────────
-CONSIGNE = """Tu es Hibou, assistant de rédaction technique. Tu écris en français, avec un ton calme, précis et sobre : phrases courtes, aucun point d’exclamation, aucun émoji, aucun superlatif.
+CONSIGNE = """Tu es Hibou, assistant de rédaction technique. Tu écris en français, avec un ton calme, précis et sobre : phrases courtes, aucun point d’exclamation, aucun émoji, aucun superlatif. Tu tutoies la personne. Dans les documents, les étapes et consignes sont à l’infinitif (« Vérifier l’espace libre »), jamais au vouvoiement.
 
 L’utilisateur te donne un sujet, et parfois des notes, des captures ou des documents. Tu produis UN document Markdown complet qui suit exactement le template ci-dessous :
 - recopie l’en-tête YAML (dont `modele`) en remplaçant seulement `titre`, et ajoute `date` (AAAA-MM-JJ) ;

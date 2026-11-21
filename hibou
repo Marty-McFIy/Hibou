@@ -662,6 +662,7 @@ CONSIGNE = (
     "Tu relis le diff d’une pull request. Signale uniquement les vrais problèmes : bogue, faille de sécurité, perte de données, "
     "cas limite oublié, test manquant pour une logique risquée, code inutile ou trop compliqué. Pour chacun : "
     "« **fichier:ligne** — gravité (bloquant, important, mineur) — le problème, puis la correction proposée ». "
+    "Au plus 10 remarques, chacune une seule fois, les plus graves d’abord. "
     "Pas de compliment, pas de résumé du diff. Si rien ne pose problème, réponds seulement : « Rien à signaler. »")
 en_cours, verrou = set(), threading.Lock()
 
@@ -696,10 +697,18 @@ def relire(depot, numero, titre):
         if not diff.strip():
             return
         rep = json.loads(http("POST", f"{e['LLM_URL']}/chat/completions", cle=e["LLM_CLE"], corps={
-            "model": e["MODELE"], "temperature": 0.2, "max_tokens": 4096,
+            # Un petit modèle peut répéter la même remarque jusqu’à la limite : pénalité, limite plus basse, doublons retirés ensuite.
+            "model": e["MODELE"], "temperature": 0.2, "max_tokens": 2048, "presence_penalty": 1.0,
             "messages": [{"role": "system", "content": CONSIGNE},
                          {"role": "user", "content": f"Pull request : {titre}\n\n```diff\n{diff}\n```"}]}))
-        avis = (rep["choices"][0]["message"].get("content") or "").strip() or "Rien à signaler."
+        choix = rep["choices"][0]
+        vus, paragraphes = set(), []
+        for p in (choix["message"].get("content") or "").split("\n\n"):
+            if p.strip() and p.strip() not in vus:
+                vus.add(p.strip()); paragraphes.append(p.strip())
+        avis = "\n\n".join(paragraphes) or "Rien à signaler."
+        if choix.get("finish_reason") == "length":
+            avis += "\n\n_Avis coupé à la limite de longueur : la fin peut manquer._"
         if coupe:
             avis += f"\n\n_Diff trop long : seuls les {LIMITE // 1000} premiers milliers de caractères ont été relus._"
         avis += f"\n\n<sub>Relecture Hibou ({e['MODELE']}), consultative : la décision reste humaine.</sub>"

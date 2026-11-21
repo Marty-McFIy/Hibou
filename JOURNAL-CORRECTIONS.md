@@ -234,6 +234,21 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 - Test : `autotest` (22 lignes). Non mesurable sur la machine d'essai (une carte de 4 Go) : à valider sur le premier serveur de 24 ou 48 Go.
 - Non corrigé : `*mmproj*F16*` prend aussi `mmproj-BF16` (deux projecteurs téléchargés, ~0,7 à 1,2 Go) ; c'est le BF16 qui est chargé et validé à l'essai (processeur sans F16C) : changement non testé.
 
+## B24 — Relecteur : le 4B répète la même remarque jusqu'à la limite (avis illisible, 3 min 22 s)
+- Symptôme : PR piégée (`eval(input())`, dépôt `essai-relecture`) : la première remarque est juste (`eval()`, bloquant), puis « absence de gestion des retours d'erreur… » répétée ~130 fois jusqu'à `max_tokens` 4096.
+- Cause : aucune pénalité de répétition, limite haute, consigne sans nombre maximal de remarques ; un petit modèle quantifié entre en boucle.
+- Diff (`source_relecteur`) : consigne « Au plus 10 remarques, chacune une seule fois, les plus graves d'abord » ; `max_tokens` 2048, `presence_penalty` 1.0 ;
+  paragraphes en double retirés ; mention « Avis coupé » si `finish_reason` = `length`.
+- Test : mêmes réglages sur le même diff, 2 essais : 32 s / 667 tokens et 4 s / 77 tokens, `finish_reason: stop`. `mettre-a-jour forge` n° 24 puis nouveau commit sur la PR :
+  avis en **13 s**, 3 remarques, `eval()` en premier (bloquant). **Prouvé.** Numéros de ligne approximatifs (limite du 4B).
+
+## Contexte : ce qui se passe quand une conversation devient longue
+- doc (Open WebUI → llama-server, contexte 8 192 sur `doc:4`) : **aucune compression**. Open WebUI renvoie tout l'historique à chaque message.
+  Mesure directe : 7 781 tokens → réponse juste ; 10 371 tokens → `HTTP 400 exceed_context_size_error` (« request (10371 tokens) exceeds the available context size (8192 tokens) »).
+  Pas de troncature silencieuse : la conversation devient inutilisable, il faut en ouvrir une nouvelle.
+- dev (OpenCode, contexte 32 768 sur `dev:5`) : **compaction automatique** quand l'historique approche de la limite (contexte − sortie réservée = 24 576) ;
+  OpenCode fait résumer la session par le modèle et repart du résumé (B17 : 2 compactions sur un essai de 10 min).
+
 ## Constats sur les agents (doc et dev), profil ≥ 4 Go
 - Où vont les fichiers : **dev** (OpenCode, conteneur sur forge) écrit dans `/workspace/<projet>` = `/srv/workspace/<projet>` de la VM forge (uid 1000), un clone par projet.
   **doc** (Open WebUI) n'écrit aucun fichier : l'outil dépose le document par l'API de Forgejo, directement dans hibou-docs (`docs/<dossier>/<nom>.md`).

@@ -13,6 +13,7 @@ Détail, symptômes et preuves : `JOURNAL-CORRECTIONS.md`.
   consignes « Hors ligne », commandes `forgejo-nouveau-depot` et `forgejo-pr`, refus immédiats (`apt`, `su`, `--index-url`…), consignes rejouées en mise à jour (B18).
 - Open WebUI : les 8 modèles (dont « Documentation interne ») sont créés ou mis à jour, sans `|| true` (B21).
 - Agent dev : `main` protégée dans chaque dépôt qu'il crée, rien à la racine de /workspace, `rm -r … .git` refusé (B22) ; le relecteur signale ses échecs dans la PR (B23).
+- Relecteur : au plus 10 remarques, pénalité de répétition, doublons retirés (B24 : le 4B bouclait jusqu'à la limite).
 - Profils : `dev:2` en Coder-Next Q3 et `doc:2` en Gemma Q4 pour tenir dans 48 et 24 Go, complétion 7B téléchargée une seule fois (A2).
 - Rédaction : `publier_forgejo` 0.2.0 met le Markdown aux règles du runner avant publication (B19) ; l'outil est mis à jour à chaque `mettre-a-jour forge` (B20).
 

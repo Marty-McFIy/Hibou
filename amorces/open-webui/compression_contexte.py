@@ -1,12 +1,14 @@
 """
 title: Compression du contexte
 author: Hibou
-version: 0.1.0
-description: Quand une conversation approche de la limite du modèle, résume les anciens échanges et garde les derniers tels quels.
+version: 0.2.0
+description: Quand une conversation approche de la limite du modèle, résume les anciens échanges et garde les derniers tels quels. Bouton dans la barre de saisie pour la couper.
 """
 # Sans ce filtre, Open WebUI renvoie tout l’historique : au-delà du contexte du modèle, le serveur refuse la requête
 # (« exceeds the available context size ») et la conversation est perdue. Le filtre passe avant l’ajout des extraits
 # de la base de connaissances : il vise la moitié du contexte pour leur laisser la place.
+# Chacun garde la main : bouton « Compression du contexte » dans la barre de saisie (actif par défaut sur les modèles Hibou),
+# et réglage personnel « Ne jamais compresser mes conversations ».
 import json, os
 
 import aiohttp
@@ -34,8 +36,13 @@ class Filter:
         seuil: float = Field(0.5, description="Part du contexte au-delà de laquelle les anciens échanges sont résumés.")
         garder: int = Field(4, description="Nombre minimal de derniers messages gardés tels quels.")
 
+    class UserValves(BaseModel):
+        jamais: bool = Field(False, description="Ne jamais compresser mes conversations, même si le bouton est actif.")
+
     def __init__(self):
         self.valves = self.Valves()
+        self.toggle = True   # bouton dans la barre de saisie : le filtre n’agit que s’il est activé pour la conversation
+        self.icon = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM2Qjc2OTAiIHN0cm9rZS13aWR0aD0iMS43NSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNCA2aDE2Ij48L3BhdGg+PHBhdGggZD0iTTQgMTBoMTYiPjwvcGF0aD48cGF0aCBkPSJNNCAxNGgxMCI+PC9wYXRoPjxwYXRoIGQ9Ik00IDE4aDYiPjwvcGF0aD48L3N2Zz4="
         self.resumes = {}  # conversation -> (nombre de messages déjà résumés, résumé)
 
     async def _resumer(self, modele: str, resume: str, messages) -> str:
@@ -51,7 +58,10 @@ class Filter:
                 r.raise_for_status()
                 return (await r.json())["choices"][0]["message"]["content"].strip()
 
-    async def inlet(self, body: dict, __model__: dict = None, __metadata__: dict = None, __event_emitter__=None) -> dict:
+    async def inlet(self, body: dict, __user__: dict = None, __model__: dict = None, __metadata__: dict = None, __event_emitter__=None) -> dict:
+        reglages = (__user__ or {}).get("valves")
+        if reglages is not None and getattr(reglages, "jamais", False):
+            return body
         modele = ((__model__ or {}).get("info") or {}).get("base_model_id") or (__model__ or {}).get("id") or body.get("model")
         contexte = json.loads(self.valves.contextes or "{}").get(modele)
         messages = body.get("messages") or []
@@ -86,7 +96,7 @@ class Filter:
                 resume = await self._resumer(modele, resume, morceau)
             self.resumes[cle] = (len(anciens), resume)
             note = f"Résumé des échanges précédents (compression automatique Hibou) :\n{resume}"
-            fin = f"{len(anciens)} anciens messages résumés ; les {len(recents)} derniers sont gardés tels quels."
+            fin = f"{len(anciens)} anciens messages résumés ; les {len(recents)} derniers sont gardés tels quels. Bouton « Compression du contexte » pour la couper."
         except Exception as e:  # le résumé a échoué : on retire les plus anciens plutôt que de perdre la conversation
             note = "Les premiers échanges de cette conversation ont été retirés : elle dépassait la mémoire du modèle."
             fin = f"Résumé impossible ({e.__class__.__name__}) : {len(anciens)} anciens messages retirés."

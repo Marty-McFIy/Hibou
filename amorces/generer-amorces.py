@@ -238,8 +238,8 @@ jobs:
 # ─── Open WebUI : un modèle par template ────────────────────────────────────
 CONSIGNE = """Tu es Hibou, assistant de rédaction technique. Tu écris en français, avec un ton calme, précis et sobre : phrases courtes, aucun point d’exclamation, aucun émoji, aucun superlatif. Tu tutoies la personne. Dans les documents, les étapes et consignes sont à l’infinitif (« Vérifier l’espace libre »), jamais au vouvoiement.
 
-L’utilisateur te donne un sujet, et parfois des notes, des captures ou des documents. Tu produis UN document Markdown complet qui suit exactement le template ci-dessous :
-- recopie l’en-tête YAML (dont `modele`) en remplaçant seulement `titre`, et ajoute `date` (AAAA-MM-JJ) ;
+La personne te donne un sujet, et parfois des notes, des captures ou des documents. Tu produis UN document Markdown complet qui suit exactement le template ci-dessous :
+- recopie l’en-tête YAML (dont `modele`) en remplaçant seulement `titre`, et ajoute `date: {{{{CURRENT_DATE}}}}` (date du jour, ne l’invente pas) ;
 - garde toutes les sections `##`, dans le même ordre et avec les mêmes intitulés ;
 - remplace chaque consigne en commentaire `<!-- -->` par le contenu ; n’en laisse aucune ;
 - pour un schéma, utilise un bloc ```mermaid valide ;
@@ -247,12 +247,13 @@ L’utilisateur te donne un sujet, et parfois des notes, des captures ou des doc
 - blocs de code : une ligne vide avant et après, et le langage indiqué (```bash, ```text) ; adresses entre chevrons <https://…> ou dans du code ;
 - n’invente ni commande, ni version, ni chiffre : si une information manque, écris « À compléter : » suivi de ce qu’il faut fournir.
 
-Avant de rédiger, si le sujet est trop vague pour remplir les sections, pose au plus trois questions. Quand le document est prêt et que l’utilisateur le valide, propose de le publier dans Forgejo avec l’outil publier_document.
+Avant de rédiger, si le sujet est trop vague pour remplir les sections, pose au plus trois questions. Appuie-toi sur les documents des bases de connaissances (modèles Hibou, recommandations de sécurité) quand ils sont pertinents, et cite-les. Quand le document est prêt, demande à la personne si elle veut le publier dans la documentation. Publie seulement après son accord explicite, avec l’outil publier_document et le chemin `docs/{dossier}/<nom-en-minuscules-sans-accent>.md`. Pour modifier un document déjà publié, lis-le d’abord (outil lire_document), puis propose la nouvelle version complète (outil mettre_a_jour_document). Ne nomme jamais tes outils dans tes réponses.
 
 Template « {titre} » :
 
 {template}"""
 
+DOSSIERS = {'procedure': 'procedures', 'fiche-technique': 'fiches-techniques', 'guide-utilisateur': 'guides', 'architecture': 'architecture', 'decision': 'decisions'}   # dossier de publication de chaque type de document
 modeles = []
 for tid, titre, public, _ in TEMPLATES:
     tpl = (OUT / f"hibou-docs/templates/{tid}.md").read_text()
@@ -264,7 +265,7 @@ for tid, titre, public, _ in TEMPLATES:
                  "profile_image_url": "/static/hibou/symbole-sur-nuit.svg",
                  "toolIds": ["publier_forgejo", "exporter_document"],
                  "capabilities": {"vision": True, "citations": True}},
-        "params": {"system": CONSIGNE.format(titre=titre, template=tpl), "temperature": 0.4},
+        "params": {"system": CONSIGNE.format(titre=titre, template=tpl, dossier=DOSSIERS[tid]), "temperature": 0.4},
         "is_active": True,
     })
 ecrire("open-webui/modeles-hibou.json", json.dumps(modeles, ensure_ascii=False, indent=2) + "\n")
@@ -274,8 +275,8 @@ ecrire("open-webui/publier_forgejo.py", '''
 """
 title: Publier dans Forgejo
 author: Hibou
-version: 0.3.1
-description: Dépose un document Markdown dans hibou-docs, sur une branche, et ouvre une pull request.
+version: 0.4.0
+description: Publie un document Markdown dans hibou-docs, lit un document publié ou en propose une nouvelle version, toujours par pull request.
 """
 import base64, datetime, re
 import requests
@@ -359,8 +360,67 @@ class Tools:
                 "body": f"Demandé par {auteur}" + (f" ({courriel})" if courriel else "") + ", rédigé avec Hibou. Le runner vérifie le style, les sections et les schémas."})
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 422:
-                return "Ce fichier existe déjà sur main. Choisis un autre chemin, ou modifie-le dans Forgejo."
+                return "Ce fichier existe déjà : lis-le avec lire_document, puis propose une nouvelle version avec mettre_a_jour_document."
             return f"Forgejo a refusé la publication ({e}). Vérifie le jeton et le dépôt dans les réglages de l’outil."
         return f"J’ai ouvert la pull request : {pr.get('html_url')}"
+
+    def _branche(self, chemin, courriel, auteur, prefixe=""):
+        personne = re.sub(r"[^a-z0-9-]", "-", (courriel.split("@")[0] or auteur).lower()).strip("-") or "inconnu"
+        return f"redaction/{personne}/{prefixe}" + re.sub(r"[^a-z0-9-]", "-", chemin[5:-3]) + datetime.datetime.now().strftime("-%Y%m%d%H%M")
+
+    def lire_document(self, chemin: str) -> str:
+        """
+        Lit un document déjà publié dans la documentation (branche main de hibou-docs), pour le relire ou le mettre à jour.
+        :param chemin: Chemin du fichier dans le dépôt, sous docs/, terminé par .md (ex. docs/procedures/sauvegarde-forgejo.md).
+        :return: Le contenu Markdown du document, ou la raison de l’échec.
+        """
+        if not re.fullmatch(r"docs/[a-z0-9][a-z0-9/_-]*\\.md", chemin) or ".." in chemin:
+            return "Chemin refusé. Utilise docs/<dossier>/<nom-en-minuscules>.md."
+        try:
+            r = self._api("GET", f"/contents/{chemin}?ref=main")
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                return "Ce document n’existe pas dans la documentation publiée."
+            return f"Forgejo a refusé la lecture ({e})."
+        return base64.b64decode(r.get("content", "")).decode()
+
+    def mettre_a_jour_document(self, titre: str, chemin: str, contenu: str, resume: str = "", __user__: dict = {}) -> str:
+        """
+        Propose une nouvelle version d’un document déjà publié, par une pull request à relire. Lis-le d’abord avec lire_document.
+        :param titre: Titre du document.
+        :param chemin: Chemin du fichier existant, sous docs/, terminé par .md.
+        :param contenu: Le document Markdown complet, en-tête YAML compris, dans sa nouvelle version.
+        :param resume: Ce qui change, en une ou deux phrases.
+        :return: L’adresse de la pull request, ou ce qu’il faut corriger.
+        """
+        if not self.valves.jeton:
+            return "Aucun jeton configuré. Renseigne-le dans les réglages de l’outil."
+        if not re.fullmatch(r"docs/[a-z0-9][a-z0-9/_-]*\\.md", chemin) or ".." in chemin:
+            return "Chemin refusé. Utilise docs/<dossier>/<nom-en-minuscules>.md."
+        contenu = normaliser(contenu)
+        if not contenu.startswith("---"):
+            return "Le document doit commencer par son en-tête YAML (modele, titre)."
+        if "<!--" in contenu:
+            return "Le document contient encore des consignes du template (<!-- … -->). Remplace chacune par le contenu, puis propose à nouveau."
+        auteur = (__user__ or {}).get("name") or "inconnu"
+        courriel = (__user__ or {}).get("email") or ""
+        branche = self._branche(chemin, courriel, auteur, "maj-")
+        try:
+            sha = self._api("GET", f"/contents/{chemin}?ref=main").get("sha")
+        except requests.HTTPError:
+            return "Ce document n’existe pas encore : publie-le comme un nouveau document."
+        try:
+            self._api("POST", "/branches", json={"new_branch_name": branche, "old_branch_name": "main"})
+            self._api("PUT", f"/contents/{chemin}", json={
+                "branch": branche, "sha": sha, "message": f"Mise à jour : {titre}",
+                "content": base64.b64encode(contenu.encode()).decode(),
+                **({"author": {"name": auteur, "email": courriel}} if courriel else {})})
+            pr = self._api("POST", "/pulls", json={
+                "head": branche, "base": "main", "title": f"Mise à jour : {titre}",
+                "body": (resume + "\\n\\n" if resume else "") + f"Demandé par {auteur}" + (f" ({courriel})" if courriel else "")
+                        + ", rédigé avec Hibou. Le runner vérifie le style, les sections et les schémas."})
+        except requests.HTTPError as e:
+            return f"Forgejo a refusé la mise à jour ({e}). Vérifie le jeton et le dépôt dans les réglages de l’outil."
+        return f"J’ai ouvert la pull request de mise à jour : {pr.get('html_url')}"
 ''')
 print("ok", sum(1 for _ in OUT.rglob("*") if _.is_file()), "fichiers")

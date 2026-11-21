@@ -1,6 +1,11 @@
 # Changelog
 
 ## Non publié
+- Documentation de sécurité (option du menu) : guides de l’ANSSI et textes de référence, base et modèle « Hibou · Sécurité » (B49).
+- Bouton « Compression du contexte » dans le chat et réglage personnel « Ne jamais compresser » (B46).
+- Outils doc `lire_document`, `mettre_a_jour_document` ; commande dev `forgejo-tickets` (B50).
+- Prompts des rédacteurs : date du jour, dossier de publication, publication sur accord, outils jamais nommés (B48) ; chat : invite sans double cadre (B47) ;
+  embeddings limités à 4 requêtes simultanées imposées à chaque passage (B51, la variable n’était lue qu’au premier démarrage).
 - Mises à jour sans tout redémarrer : seuls les conteneurs dont un fichier de configuration a changé redémarrent (B45).
 - `hibou-docs` : la PR d'outils est ouverte au nom de hibou-redac, approuvable par un administrateur ; `publier_forgejo` refuse un gabarit non rempli (B44).
 

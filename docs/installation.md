@@ -36,6 +36,7 @@ Le menu demande :
 | Cartes de dev et de doc | modèle et nombre ; le profil conseillé suit la mémoire vidéo |
 | Génération d’images | « Non », ou une carte dédiée |
 | Miroir | versions de Python, listes pip, npm, git, images Docker |
+| Documentation de sécurité | « Oui » : guides de l’ANSSI (environ 170 Mo) et tes textes de référence (`securite.d/autres.txt`, `securite.d/ajouts/`) pour la base « Hibou · Sécurité » |
 | Administrateur, utilisateurs | dans l’ordre de priorité ; équipes doc, dev ou les deux |
 | Phrase de passe | chiffre les secrets du bundle |
 

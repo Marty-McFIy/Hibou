@@ -26,7 +26,7 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Installation sans question | `hibou installer forge|doc|dev|noeud` : VM créée par cloud-init, bundle copié, tout installé et vérifié | Validé |
 | Passthrough des cartes | Cartes confiées à `vfio-pci` sans redémarrer l’hôte, ajoutées à la VM, vérifiées par `nvidia-smi` | Validé (1 carte) |
 | Hôte partagé | `HIBOU_RAM_GPU`, `HIBOU_CPU_GPU` : mémoire et fils de la VM GPU | Validé |
-| Mise à jour | `hibou mettre-a-jour <rôle>` : n’apporte que ce qui a changé, garde comptes, secrets, conversations et dépôts, s’arrête si un service redémarre en boucle | Validé |
+| Mise à jour | `hibou mettre-a-jour <rôle>` : n’apporte que ce qui a changé, garde comptes, secrets, conversations et dépôts ; ne redémarre que les services dont la configuration change ; s’arrête si un service redémarre en boucle | Validé |
 | Changement de profil | « Changer seulement les cartes et les modèles » : ancien modèle retiré du bundle et de la VM, chat et évaluation rebranchés automatiquement | Validé (4B → 9B → 4B) |
 | Pare-feu | Les ports des serveurs GPU ne s’ouvrent qu’à forge (nftables) | Validé |
 | Réseau isolé | DNS et heure servis par forge, autorité de certification interne, TLS partout | Validé |
@@ -55,7 +55,9 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Publication dans Forgejo | L’outil `publier_forgejo` dépose le document validé dans `hibou-docs`, sur une branche au nom de la personne, et ouvre une pull request | Validé |
 | Export de fichiers | L’outil `exporter_document` crée un `.docx`, `.pdf`, `.pptx`, `.xlsx` ou `.md` aux couleurs Hibou, attaché à la réponse et téléchargeable | Validé |
 | Documentation interne | Modèle qui répond à partir de la documentation fusionnée, avec ses sources | Validé |
-| Compression du contexte | Une conversation trop longue est résumée automatiquement au lieu d’échouer ; les derniers messages restent intacts | Validé |
+| Compression du contexte | Une conversation trop longue est résumée automatiquement au lieu d’échouer ; les derniers messages restent intacts. Bouton « Compression du contexte » dans le menu « + » (actif par défaut) et réglage personnel « Ne jamais compresser » | Validé |
+| Base « Hibou · Sécurité » (option) | Guides et recommandations de l’ANSSI récupérés à la préparation du bundle, plus tes textes de référence (IGI 1300, II 901…) ; modèle « Hibou · Sécurité » qui cite le guide utilisé | Validé (indexation en tâche de fond) |
+| Mise à jour d’un document publié | Lire un document de la documentation et en proposer une nouvelle version par pull request | Validé (outil installé) |
 | Espace personnel | Conversations et fichiers propres à chaque compte : personne ne voit ceux des autres | Validé |
 | Charte Hibou | Thème nuit et brume, polices, logo, écran de démarrage, suggestions, modèle par défaut ; contrastes AA dans les deux thèmes | Validé (textes d’Open WebUI au vouvoiement) |
 
@@ -67,6 +69,7 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Hors ligne | pip et npm passent par le miroir de Forgejo, pytest fourni, consignes adaptées | Validé |
 | Nouveau projet en une commande | `forgejo-nouveau-depot` crée le dépôt, protège `main`, le clone, pose un `.gitignore` | Validé |
 | Pull request en une commande | `forgejo-pr` pousse la branche `agent/<sujet>` et ouvre la PR, « Demandé par @<personne> » | Validé |
+| Tickets | `forgejo-tickets` liste les tickets ouverts du projet ; « Closes #n » dans la PR les ferme à la fusion | Validé (commande installée) |
 | Garde-fous | `main` protégée partout, pas de création de dépôt par push, refus d’office : `sudo`, `apt`, `rm -rf .git`, affichage des secrets… | Validé |
 | Compaction automatique | OpenCode résume la session quand elle approche de la limite du modèle | Validé |
 

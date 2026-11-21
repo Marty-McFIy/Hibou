@@ -479,6 +479,46 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 - Test : `mettre-a-jour forge` n° 53 sans changement : « Aucun fichier de configuration modifié », aucun conteneur redémarré ;
   n° 54 après une ligne ajoutée à la main dans `AGENTS.md` : seul `opencode-alice` redémarré, consignes rétablies dans le conteneur, les autres intacts. **Prouvé.**
 
+## B46 — Compression du contexte : bouton pour chaque personne (demande de l'utilisateur)
+- Diff : filtre `compression_contexte` 0.2.0 à bascule (`toggle`), icône « Résumer » de la charte, réglage personnel « Ne jamais compresser mes conversations » (`UserValves`) ;
+  le script le rattache à tous les modèles de chat et le coche par défaut (`filterIds`, `defaultFilterIds`) ; statut final « Bouton « Compression du contexte » pour la couper ».
+- Test (alice, 40 messages, ~10 400 tokens) : bouton actif → « je résume 31 anciens messages » ; bouton coupé → refus du serveur (15 122 tokens pour 8 192) ;
+  bouton actif + « jamais » → aucune compression. Capture : menu « + » du chat, interrupteur actif par défaut. **Prouvé.**
+
+## B47 — Chat : défauts d'affichage pendant un échange
+- Constats (captures d'un échange complet, sombre et clair) : double cadre dans l'invite et texte collé au bord (mon CSS appliquait creux et arrondi au conteneur ET au champ),
+  fond de l'invite gris neutre au lieu de `fond-creux`, numéros de ligne des blocs de code sur une pastille grise.
+- Diff : creux, arrondi et `fond-creux` sur le conteneur seul ; champ transparent, sans anneau (la lueur du conteneur marque le focus), marge 8 × 14 px ; gouttière des blocs de code transparente.
+- Test : captures après (sombre, clair) : un seul cadre creusé, texte décollé, lueur ambre au focus. **Prouvé.**
+
+## B48 — Prompts des rédacteurs
+- Constats : date inventée (2025-07-22), dossier de publication à deviner, nom de l'outil cité à la personne (« avec l'outil `publier_document` »), « Souhaitez-vous… », rien sur les bases de connaissances.
+- Diff : `date: {{CURRENT_DATE}}` (Open WebUI la remplace), dossier par type (`docs/procedures`, `docs/fiches-techniques`, `docs/guides`, `docs/architecture`, `docs/decisions`),
+  publication seulement après accord explicite, « Ne nomme jamais tes outils », appui sur les bases de connaissances, « la personne » au lieu de « l'utilisateur » ;
+  « Documentation interne » : outil d'export et même règle. Les questions de suivi d'Open WebUI sont déjà à l'infinitif : gabarits des tâches laissés.
+- Test : rédaction après mise à jour : étapes à l'infinitif, plus de nom d'outil dans la réponse.
+
+## B49 — Documentation de sécurité dans le chat (demande de l'utilisateur)
+- Menu de `telecharger` : « Documentation de sécurité : l'ajouter au bundle ? » (`HIBOU_SECURITE`, partie `securite`). Récupère tous les guides de l'ANSSI en français depuis
+  `messervices.cyber.gouv.fr/guides` (le site cyber.gouv.fr est protégé contre les robots : non contourné), plus une liste `securite.d/autres.txt` (adresses de PDF) et un dossier
+  `securite.d/ajouts/` pour les textes sans lien direct : IGI 1300 (site du SGDSN protégé), II 901, PSSIE, RGS, guide de la CNIL. Index `securite/INDEX.tsv`.
+- forge : base « Hibou · Sécurité » (lecture pour tous), chargée en tâche de fond par `charger_securite.py` (`systemctl status hibou-securite`, reprise où elle s'est arrêtée) ;
+  modèle « Hibou · Sécurité » (cite le guide et la recommandation, signale quand il sort des documents).
+- Mesures : 179 documents (135 guides), 164 Mo, téléchargés en 47 s à 3 min 37 s ; 1 PDF absent côté ANSSI. Adresses accentuées encodées (7 échecs au premier essai).
+  Indexation sur ce processeur : ~20 s par document.
+
+## B50 — Outils manquants pour doc et dev
+- doc : `publier_forgejo` 0.4.0 : `lire_document` (version publiée) et `mettre_a_jour_document` (nouvelle version par PR) ; consigne des rédacteurs : lire puis proposer.
+- dev : commande `forgejo-tickets` (tickets ouverts du projet) ; consigne : « Closes #<numéro> » dans la PR pour fermer le ticket à la fusion.
+- Test : outil installé avec ses trois fonctions ; `forgejo-tickets` dans l'instance d'alice, consigne présente.
+
+## B51 — Indexation de la base sécurité refusée par le serveur d'embeddings
+- Constat : 131 documents refusés (HTTP 400 d'Open WebUI) ; dans les journaux, llama-swap répond 429 aux embeddings. Open WebUI envoie les lots sans limite de concurrence :
+  `RAG_EMBEDDING_CONCURRENT_REQUESTS` est une PersistentConfig, lue au premier démarrage seulement, donc ignorée sur une installation existante.
+- Diff : `amorcer_open_webui` impose par l'API (`/retrieval/embedding/update`) lots de 16 et 4 requêtes simultanées, à chaque installation et mise à jour.
+- Test : `mettre-a-jour forge` n° 58 ; base : `embedding_batch_size 16`, `embedding_concurrent_requests 4` ; reprise « 179 documents, 9 déjà dans la base, 170 à ajouter » ;
+  sur 10 min : 0 refus, 0 réponse 429, un document toutes les ~20 s. **Prouvé.**
+
 ## Écarts de charte non corrigés (décision ou limite)
 - Open WebUI : « Connectez-vous à Hibou (Open WebUI) » : la mention « (Open WebUI) » est imposée par sa licence ; textes français au vouvoiement (« Comment puis-je vous aider aujourd'hui ? »),
   compilés dans des fichiers JavaScript au nom changeant à chaque version : non modifiés (bricolage fragile).

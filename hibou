@@ -254,6 +254,21 @@ listes_miroir() {  # dossier : modèles de listes, jamais écrasés
   for f in "${!ex[@]}"; do [[ -f "$1/$f" ]] || printf '%s' "${ex[$f]}" > "$1/$f"; done
 }
 
+listes_securite() {  # dossier : liste de textes de référence et dossier d’ajouts, jamais écrasés
+  install -d "$1/ajouts"
+  [[ -f "$1/autres.txt" ]] || cat > "$1/autres.txt" <<'TXT'
+# Textes de référence à ajouter à la base « Hibou · Sécurité », un par ligne : adresse d’un PDF, puis le titre.
+# Les guides de l’ANSSI sont récupérés d’office. Pour ceux-ci, prends le PDF sur le site officiel (ou dépose-le
+# dans ajouts/ si le site ne se laisse pas télécharger par un script) :
+#   IGI 1300 (protection du secret de la défense nationale) : sgdsn.gouv.fr ou legifrance.gouv.fr
+#   II 901 (protection des systèmes d’information sensibles) : legifrance.gouv.fr (circulaires)
+#   PSSIE (politique de sécurité des SI de l’État) et RGS (référentiel général de sécurité) : cyber.gouv.fr
+#   Guide de la sécurité des données personnelles : cnil.fr
+# Exemple :
+# https://exemple.gouv.fr/document.pdf Titre du document
+TXT
+}
+
 choisir_materiel() {
   etape "Serveur dev"
   choisir_gpu DEV "Serveur dev"
@@ -284,7 +299,7 @@ ecrire_config() {  # dossier
   { echo "# Réponses du menu Hibou $VERSION_HIBOU ($(date +%F)). Rien de secret ici."
     for v in DOMAINE RESEAU PASSERELLE PONT VLAN IP_FORGE IP_DOC IP_DEV IP_PVE_DOC IP_PVE_DEV IP_CLUSTER \
              VMID_FORGE VMID_DOC VMID_DEV DISQUE_FORGE DISQUE_DOC DISQUE_DEV RAM_FORGE CPU_FORGE STOCKAGE STOCKAGE_SAUVEGARDE \
-             DEV_GPU DEV_GO DEV_NB DOC_GPU DOC_GO DOC_NB IMG_GPU IMG_GO IMG_NB PROFIL_DEV PROFIL_DOC SPECULATIF MIROIR PY_VERSIONS; do
+             DEV_GPU DEV_GO DEV_NB DOC_GPU DOC_GO DOC_NB IMG_GPU IMG_GO IMG_NB PROFIL_DEV PROFIL_DOC SPECULATIF MIROIR PY_VERSIONS SECURITE; do
       v="HIBOU_$v"; printf '%s=%q\n' "$v" "${!v:-}"
     done
   } > "$1/config.env"
@@ -340,6 +355,16 @@ configurer_bundle() {  # dossier
     demander HIBOU_PY_VERSIONS "Versions de Python à couvrir" "3.11 3.12 3.13" '^[0-9. ]+$'
     listes_miroir "$s/miroir.d"
     dire "Remplis les listes dans $s/miroir.d (une entrée par ligne), puis appuie sur Entrée."
+    read -r _
+  fi
+
+  etape "Documentation de sécurité"
+  note "Guides et recommandations de l’ANSSI, et tes propres textes de référence (IGI 1300, II 901…), dans une base du chat."
+  local secu; choisir secu "L’ajouter au bundle (environ 170 Mo) ?" 2 "Non" "Oui"
+  HIBOU_SECURITE=$((secu - 1))
+  if (( HIBOU_SECURITE )); then
+    listes_securite "$s/securite.d"
+    dire "Ajoute si tu veux des adresses de PDF dans $s/securite.d/autres.txt, ou dépose des PDF dans $s/securite.d/ajouts/, puis appuie sur Entrée."
     read -r _
   fi
 
@@ -411,7 +436,7 @@ choisir_actualisation() {
   esac
 }
 
-veut() { [[ ",${HIBOU_PARTIES:-apt,extra,images,modeles,miroir}," == *",$1,"* ]]; }
+veut() { [[ ",${HIBOU_PARTIES:-apt,extra,images,modeles,miroir,securite}," == *",$1,"* ]]; }
 
 # Une image dont l’identifiant n’a pas changé n’est pas réenregistrée : le fichier du bundle reste identique,
 # rien ne repart vers les VM à la mise à jour.
@@ -865,7 +890,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git openssh-cli
 RUN npm install -g opencode-ai@${OPENCODE_VERSION}
 # shortcut: OpenCode installe ses fournisseurs à la volée ; on précharge celui qu’on utilise. Vérifier au premier test hors ligne.
 RUN mkdir -p /home/node/.cache/opencode && cd /home/node/.cache/opencode && npm install @ai-sdk/openai-compatible && chown -R node:node /home/node/.cache
-COPY forgejo-nouveau-depot forgejo-pr /usr/local/bin/
+COPY forgejo-nouveau-depot forgejo-pr forgejo-tickets /usr/local/bin/
 USER node
 WORKDIR /workspace
 ENTRYPOINT ["opencode"]
@@ -917,7 +942,15 @@ jq -n --arg h "$b" --arg t "$t" --arg d "$d" '{head:$h, base:"main", title:$t, b
   | curl -fsS -H "Authorization: token $FORGEJO_TOKEN" -H 'Content-Type: application/json' -d @- \
     "$FORGEJO_URL/api/v1/repos/$FORGEJO_ORG/$p/pulls" | jq -r '"Pull request ouverte : " + .html_url'
 SH
-  chmod 755 "$CTX/forgejo-nouveau-depot" "$CTX/forgejo-pr"
+  cat > "$CTX/forgejo-tickets" <<'SH'
+#!/bin/sh
+# forgejo-tickets [projet] : tickets ouverts du projet (celui du dossier courant par défaut), pour savoir quoi faire.
+set -eu
+p="${1:-$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")}"
+curl -fsS -H "Authorization: token $FORGEJO_TOKEN" "$FORGEJO_URL/api/v1/repos/$FORGEJO_ORG/$p/issues?state=open&type=issues&limit=50" \
+  | jq -r 'if length == 0 then "Aucun ticket ouvert." else .[] | "#\(.number) \(.title)\n\((.body // "") | .[0:600])\n" end'
+SH
+  chmod 755 "$CTX/forgejo-nouveau-depot" "$CTX/forgejo-pr" "$CTX/forgejo-tickets"
   construire opencode; rm -rf "$CTX"
   note "docs-builder (construite localement)"
   CTX="$(mktemp -d)"
@@ -1039,6 +1072,57 @@ EOF
   [[ " $HIBOU_PY_VERSIONS " == *" 3.11 "* ]] || { HIBOU_PY_VERSIONS+=" 3.11"; note "Python 3.11 ajouté au miroir : c’est celui de l’agent OpenCode."; }
   HIBOU_PY_VERSIONS="$HIBOU_PY_VERSIONS" python3 "$ICI_HIBOU/hibou-miroir.py" prepare --src "$SORTIE/miroir.d" --out "$SORTIE/mirror"
   fait "Miroir prêt : $(du -sh "$SORTIE/mirror" | cut -f1)."
+  fi
+  if veut securite && [[ "${HIBOU_SECURITE:-0}" == 1 ]]; then
+  etape "Documentation de sécurité (ANSSI, textes de référence)"
+  listes_securite "$SORTIE/securite.d"
+  install -d "$SORTIE/securite/anssi" "$SORTIE/securite/autres" "$SORTIE/securite/ajouts"
+  cp -a "$SORTIE/securite.d/ajouts/." "$SORTIE/securite/ajouts/" 2>/dev/null || true   # dossier d’ajouts vide : rien à copier
+  python3 - "$SORTIE" <<'PY' || erreur "Le portail de l’ANSSI ne répond pas." "Relance plus tard : HIBOU_PARTIES=securite ./hibou telecharger …"
+import concurrent.futures as cf, html, pathlib, re, sys, urllib.parse, urllib.request
+S = pathlib.Path(sys.argv[1]); B = "https://messervices.cyber.gouv.fr"
+def lire(u):
+    u = urllib.parse.quote(u, safe=":/%?=&")   # adresses avec accents (« stratégique », « données »…)
+    for essai in range(3):
+        try:
+            return urllib.request.urlopen(u, timeout=120).read()
+        except Exception:
+            if essai == 2: raise
+def page(slug):
+    t = lire(f"{B}/guides/{slug}").decode(errors="replace")
+    titre = html.unescape((re.search(r"<title>([^<|]+)", t) or [None, slug])[1]).strip()
+    return titre, sorted(set(re.findall(r"https://messervices\.cyber\.gouv\.fr/documents-guides/[^\"\\ ]+?\.pdf", t)))
+slugs = sorted({x for x in re.findall(r"/guides/([A-Za-z0-9-]+)", lire(B + "/guides").decode(errors="replace")) if not x.lower().startswith("en-")})
+index, echecs = [], 0
+with cf.ThreadPoolExecutor(4) as ex:
+    pages = list(ex.map(lambda x: (x, *page(x)), slugs))
+for slug, titre, pdfs in pages:
+    if "(EN)" in titre:  # version anglaise d’un guide déjà présent en français
+        continue
+    for i, u in enumerate(pdfs):
+        f = S / "securite/anssi" / u.rsplit("/", 1)[1]
+        if not f.exists() or f.stat().st_size == 0:
+            try:
+                f.write_bytes(lire(u))
+            except Exception:
+                echecs += 1; print(f"  non téléchargé : {u}"); continue
+        index.append(f"anssi/{f.name}\tANSSI · {titre}" + (f" ({i + 1})" if len(pdfs) > 1 else "") + f"\t{u}")
+for ligne in (S / "securite.d/autres.txt").read_text().splitlines():
+    if not ligne.strip() or ligne.lstrip().startswith("#"):
+        continue
+    u, _, titre = ligne.strip().partition(" ")
+    f = S / "securite/autres" / u.rsplit("/", 1)[1].split("?")[0]
+    try:
+        if not f.exists(): f.write_bytes(lire(u))
+        index.append(f"autres/{f.name}\t{titre or f.stem}\t{u}")
+    except Exception:
+        echecs += 1; print(f"  non téléchargé : {u}")
+for f in sorted((S / "securite/ajouts").glob("*.pdf")):
+    index.append(f"ajouts/{f.name}\t{f.stem}\tajout local")
+(S / "securite/INDEX.tsv").write_text("\n".join(index) + "\n")
+print(f"  {len(index)} documents ({len(slugs)} guides de l’ANSSI), {echecs} échec(s).")
+PY
+  fait "Documentation de sécurité : $(du -sh "$SORTIE/securite" | cut -f1) dans securite/."
   fi
   etape "Charte, manifeste, empreintes"
   local charte="${HIBOU_CHARTE:-$ICI_HIBOU/charte}"
@@ -1481,6 +1565,7 @@ copier_vers_vm() {  # rôle bundle adresse ; rsync ne transfère que ce qui a ch
     # Dossiers vides compris : un dépôt git nu sans refs/ (références dans packed-refs) n’est plus reconnu par git.
     [[ "$role" == forge && -d "$b/mirror" ]] && (cd "$b" && find mirror -type f -o -type d -empty)
     [[ "$role" == forge && -d "$b/owui-py" ]] && (cd "$b" && find owui-py -type f)
+    [[ "$role" == forge && -f "$b/securite/INDEX.tsv" ]] && (cd "$b" && find securite -type f)
   } > "$liste"
   etape "Copie du bundle $role vers la VM"
   # Modèles retirés du profil : effacés de la copie dans la VM, le reste n’est pas retransféré.
@@ -2444,6 +2529,7 @@ Forgejo a une seule adresse : https://forge.$DOMAINE (\$FORGEJO_URL). Aucun autr
 - Jamais de push sur main. Travaille sur une branche : \`git checkout -b agent/<sujet>\`, puis commite.
 - Ensuite, depuis le dossier du projet : \`forgejo-pr "<titre>" "<ce qui change et comment le vérifier>"\` (pousse la branche et ouvre la pull request).
 - Un lien en /compare/ n'est pas une pull request : seule \`forgejo-pr\` en ouvre une (elle affiche « Pull request ouverte : … »).
+- Pour savoir quoi faire dans un projet existant : \`forgejo-tickets\`. Si ta pull request règle un ticket, écris « Closes #<numéro> » dans sa description : il se fermera à la fusion.
 - Donne l'adresse de la pull request à la fin. Une personne la relit et la fusionne.
 
 ## Hors ligne
@@ -3063,7 +3149,10 @@ amorcer_open_webui() {  # bundle jeton_redac
   local public='[{"principal_type":"user","principal_id":"*","permission":"read"}]'
   # Modèle lu sur l’entrée : créé, ou mis à jour s’il existe (Open WebUI répond 401 à la création d’un identifiant déjà pris).
   modele_owui() {
-    local m; m=$(jq -c --argjson g "$public" 'if .is_active then .access_grants = $g else . end')
+    # Modèles de chat : bouton « Compression du contexte » proposé et actif par défaut (chacun peut le couper).
+    local m; m=$(jq -c --argjson g "$public" 'if .is_active then .access_grants = $g
+      | .meta.filterIds = ((.meta.filterIds // []) + ["compression_contexte"] | unique)
+      | .meta.defaultFilterIds = ((.meta.defaultFilterIds // []) + ["compression_contexte"] | unique) else . end')
     curl -fsS "${h[@]}" "$u/models/create" -d "$m" >/dev/null 2>&1 \
       || curl -fsS "${h[@]}" "$u/models/model/update?id=$(jq -r .id <<< "$m")" -d "$m" >/dev/null || return 1
     # La mise à jour ignore access_grants : les droits ont leur propre point d’entrée.
@@ -3106,6 +3195,10 @@ amorcer_open_webui() {  # bundle jeton_redac
   jq -nc --arg f "https://forge.$DOMAINE" --arg j "$2" '{forgejo_url:$f,depot:"hibou/hibou-docs",jeton:$j}' \
     | curl -fsS "${h[@]}" "$u/tools/id/publier_forgejo/valves/update" -d @- >/dev/null || return 1
   fi
+  # Embeddings : 4 requêtes simultanées par lots de 16. Open WebUI ne lit ses variables RAG_* qu’au tout premier démarrage
+  # (ensuite la valeur en base l’emporte) : sans ce réglage, l’indexation d’un gros PDF part en rafale et le serveur doc répond 429.
+  curl -fsS "${h[@]}" "$u/retrieval/embedding" | jq -c '.RAG_EMBEDDING_BATCH_SIZE = 16 | .RAG_EMBEDDING_CONCURRENT_REQUESTS = 4' \
+    | curl -fsS "${h[@]}" "$u/retrieval/embedding/update" -d @- >/dev/null || return 1
   # Base de connaissances avec les templates de hibou-docs.
   local kb f fid
   kb=$(curl -fsS "${h[@]}" "$u/knowledge/" | jq -c '(.items? // .)[] | select(.name=="Hibou · Templates")' | head -1)
@@ -3142,11 +3235,33 @@ amorcer_open_webui() {  # bundle jeton_redac
   else
     note "Open WebUI n’a pas délivré de clé d’API : la synchronisation de la documentation est à brancher à la main (secret OWUI_CLE de hibou-docs)."
   fi
+  # Base « Hibou · Sécurité » (option du menu) : guides de l’ANSSI et textes de référence. ~180 PDF : indexation
+  # en tâche de fond, reprise où elle s’est arrêtée à chaque passage.
+  if [[ -f "$1/securite/INDEX.tsv" && -n "$cle_owui" ]]; then
+    local kbsec
+    kbsec=$(curl -fsS "${h[@]}" "$u/knowledge/" | jq -c '(.items? // .)[] | select(.name=="Hibou · Sécurité")' | head -1)
+    [[ -n "$kbsec" ]] || kbsec=$(curl -fsS "${h[@]}" "$u/knowledge/create" -d '{"name":"Hibou · Sécurité","description":"Guides de l’ANSSI et textes de référence en sécurité des SI"}')
+    curl -fsS "${h[@]}" "$u/knowledge/$(jq -r .id <<< "$kbsec")/access/update" -d "{\"access_grants\":$public}" >/dev/null || return 1
+    ( umask 077; printf 'OWUI_URL=http://open-webui:8080\nOWUI_CLE=%s\nBASE_ID=%s\n' "$cle_owui" "$(jq -r .id <<< "$kbsec")" > /srv/hibou/securite.env )
+    if systemctl is-active --quiet hibou-securite; then
+      note "Base « Hibou · Sécurité » : chargement déjà en cours (journalctl -fu hibou-securite)."
+    else
+      systemd-run --unit hibou-securite --collect docker run --rm --network hibou-forge_default --env-file /srv/hibou/securite.env \
+        -v "$1/securite:/securite:ro" -v "$1/amorces/open-webui/charger_securite.py:/charger.py:ro" hibou/docs-builder:actuel python3 /charger.py /securite >/dev/null \
+        && fait "Base « Hibou · Sécurité » : $(grep -c . "$1/securite/INDEX.tsv") documents, chargement en tâche de fond (journalctl -fu hibou-securite)." \
+        || note "Chargement de la base « Hibou · Sécurité » non lancé."
+    fi
+    jq -nc --argjson kb "$kbsec" --arg b "$PRINCIPAL" '{id:"hibou-securite",name:"Hibou · Sécurité",base_model_id:$b,
+      meta:{description:"Répond à partir des guides de l’ANSSI et des textes de référence, avec ses sources.",profile_image_url:"/static/hibou/symbole-sur-nuit.svg",
+        knowledge:[$kb + {type:"collection"}],capabilities:{citations:true},toolIds:["exporter_document"]},
+      params:{system:"Tu es Hibou, conseiller en sécurité des systèmes d’information. Tu réponds en français, au tutoiement, calme et précis, sans point d’exclamation ni émoji. Tu t’appuies d’abord sur les documents fournis (guides et recommandations de l’ANSSI, textes de référence) et tu cites le document et la recommandation utilisés. Si les documents ne couvrent pas la question, dis-le avant de répondre avec tes connaissances générales, en le signalant. Pour une mise en œuvre, donne des étapes à l’infinitif et les commandes exactes. Si la personne demande un fichier, appelle l’outil exporter_document. Ne nomme jamais tes outils dans tes réponses.",temperature:0.2},
+      is_active:true}' | modele_owui || return 1
+  fi
   # Modèle de questions-réponses sur la documentation interne.
   jq -nc --argjson kb "$kbdoc" --arg b "$PRINCIPAL" '{id:"hibou-documentation",name:"Hibou · Documentation interne",base_model_id:$b,
     meta:{description:"Répond à partir de la documentation validée de hibou-docs, avec ses sources.",profile_image_url:"/static/hibou/symbole-sur-nuit.svg",
       knowledge:[$kb + {type:"collection"}],capabilities:{citations:true},toolIds:["exporter_document"]},
-    params:{system:"Tu es Hibou. Tu réponds en français, au tutoiement, calme et précis, sans point d’exclamation ni émoji. Tu réponds uniquement à partir des documents fournis et tu cites la page utilisée. Si la documentation ne contient pas la réponse, dis-le et propose de rédiger la page manquante avec un modèle Hibou de rédaction.",temperature:0.2},
+    params:{system:"Tu es Hibou. Tu réponds en français, au tutoiement, calme et précis, sans point d’exclamation ni émoji. Tu réponds uniquement à partir des documents fournis et tu cites la page utilisée. Si la documentation ne contient pas la réponse, dis-le et propose de rédiger la page manquante avec un modèle Hibou de rédaction. Si la personne demande un fichier, appelle l’outil exporter_document. Ne nomme jamais tes outils dans tes réponses.",temperature:0.2},
     is_active:true}' | modele_owui || return 1
 
   # Modèles Hibou rattachés au modèle principal réellement installé sur doc.

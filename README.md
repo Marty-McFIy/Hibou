@@ -24,7 +24,8 @@
 
 - **Une IA de documentation** (`chat.<domaine>`) : cinq rédacteurs (procédure, fiche technique, guide, architecture,
   décision), export Word, PDF, PowerPoint et Excel dans la conversation, publication dans Forgejo par pull request,
-  réponses sourcées sur la documentation validée, compression automatique des longues conversations.
+  réponses sourcées sur la documentation validée, compression des longues conversations (désactivable par chacun),
+  et en option une base de sécurité : les guides de l’ANSSI et tes textes de référence (IGI 1300…), avec un modèle qui les cite.
 - **Une IA de développement** (`code.<domaine>`) : une instance OpenCode par développeur, hors ligne (pip et npm par
   le miroir), qui crée le dépôt, travaille sur une branche et ouvre la pull request ; autocomplétion pour les éditeurs.
 - **Tout autour** : Forgejo (dépôts, paquets, Actions), relecture automatique de chaque pull request, site de

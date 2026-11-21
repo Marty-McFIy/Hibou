@@ -182,8 +182,12 @@ html.dark a {{ color: {n["accent-texte"]}; }}
 #send-message-button:not(:disabled) {{ background: {n["accent"]} !important; color: {n["sur-accent"]} !important; box-shadow: {O["nuit"]["relief-accent"]}; }}
 
 /* Champ de saisie en creux. */
-#chat-input-container, #chat-input {{ box-shadow: {O["brume"]["creux"]}; border-radius: 22px; }}
-html.dark #chat-input-container, html.dark #chat-input {{ box-shadow: {O["nuit"]["creux"]}; }}
+#chat-input-container {{ box-shadow: {O["brume"]["creux"]}; border-radius: 22px; background: {b["fond-creux"]} !important; }}
+html.dark #chat-input-container {{ box-shadow: {O["nuit"]["creux"]}; background: {n["fond-creux"]} !important; }}
+/* Le champ lui-même est transparent : creux, arrondi et focus (lueur) sont portés par le conteneur, sinon double cadre et texte collé au bord. */
+#chat-input-container #chat-input, #chat-input-container textarea {{ box-shadow: none !important; border-radius: 0 !important; background: transparent !important; outline: none !important; padding: 8px 14px !important; }}
+/* Blocs de code : numéros de ligne sans pastille. */
+.cm-gutters, .cm-gutterElement, .cm-lineNumbers .cm-gutterElement {{ background: transparent !important; border: none !important; }}
 
 /* Invite : bord accent-fonce et lueur quand elle a le focus (Hibou écoute). */
 #chat-input-container:focus-within {{ border-color: #8A5F0A !important; box-shadow: inset 0 2px 4px rgba(15,20,32,0.16), 0 0 0 1px rgba(138,95,10,0.5), 0 0 20px rgba(242,181,68,0.55) !important; }}

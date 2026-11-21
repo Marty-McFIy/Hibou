@@ -19,7 +19,10 @@ jobs:
       - name: Python des amorces et du miroir
         run: python3 -m py_compile hibou-miroir.py $(find amorces -name '*.py')
       - name: JSON des amorces
-        run: for f in $(find amorces charte -name '*.json'); do python3 -m json.tool "$f" >/dev/null || { echo "JSON invalide : $f"; exit 1; }; done
+        run: |
+          for f in $(find amorces charte -name '*.json'); do
+            python3 -m json.tool "$f" >/dev/null || { echo "JSON invalide : $f"; exit 1; }
+          done
       - name: Services embarqués (autotests)
         run: |
           bash -c 'source <(sed -n "/^source_relecteur() {/,/^}/p" hibou); source_relecteur' | HIBOU_AUTOTEST=1 python3 -

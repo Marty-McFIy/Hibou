@@ -463,6 +463,22 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 - Diff : consigne « Tu tutoies la personne. Dans les documents, les étapes et consignes sont à l'infinitif, jamais au vouvoiement » ; gabarit Procédure : « verbe à l'infinitif (« Vérifier… », « Lancer… ») ».
 - Test : 3 rédactions après la consigne seule : 1 infinitif, 1 vouvoiement, 1 gabarit vide ; après le gabarit : 2 sur 2 à l'infinitif quand un document est produit, 1 gabarit renvoyé vide (limite du 4B, déjà présente).
 
+## B44 — PR d'outils ouverte par l'administrateur, qui ne peut pas l'approuver ; gabarit vide publiable
+- Constat : la PR n° 9 (outils de hibou-docs) était ouverte par hibou-admin ; Forgejo interdit d'approuver sa propre PR, d'où une fusion forcée.
+  Et le 4B renvoie parfois le gabarit tel quel : `publier_forgejo` ouvrait une PR vouée à l'échec du runner.
+- Diff : `outils_par_pr` ouvre la PR au nom de hibou-redac (en-tête `Sudo` de l'API Forgejo, l'administrateur garde la main) ;
+  `publier_forgejo` 0.3.1 refuse un document qui contient encore `<!--` et dit quoi faire.
+- Test : PR jetable sur hibou-docs créée avec `Sudo: hibou-redac` : « ouverte par hibou-redac », approbation de hibou-admin acceptée (`official=true`), fermée ensuite ;
+  outil installé : gabarit vide → « Le document contient encore des consignes du template… ». **Prouvé.**
+
+## B45 — Une mise à jour redémarrait tous les conteneurs
+- Constat (phase 6.1) : `mettre-a-jour` faisait `docker compose up --force-recreate` : tous les services coupés quelques secondes, même sans changement.
+- Cause : le forçage servait à faire relire les fichiers de configuration montés (remplacés sur le disque, invisibles pour Docker).
+- Diff : `empreintes_montages` (empreinte des montages de configuration de chaque conteneur, données exclues) relevée au début de la mise à jour ;
+  `up` sans forçage (recrée ce dont la définition change), puis `redemarrer_montages_changes` ne redémarre que les conteneurs dont un fichier monté a changé. forge et serveurs GPU.
+- Test : `mettre-a-jour forge` n° 53 sans changement : « Aucun fichier de configuration modifié », aucun conteneur redémarré ;
+  n° 54 après une ligne ajoutée à la main dans `AGENTS.md` : seul `opencode-alice` redémarré, consignes rétablies dans le conteneur, les autres intacts. **Prouvé.**
+
 ## Écarts de charte non corrigés (décision ou limite)
 - Open WebUI : « Connectez-vous à Hibou (Open WebUI) » : la mention « (Open WebUI) » est imposée par sa licence ; textes français au vouvoiement (« Comment puis-je vous aider aujourd'hui ? »),
   compilés dans des fichiers JavaScript au nom changeant à chaque version : non modifiés (bricolage fragile).

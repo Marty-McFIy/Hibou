@@ -274,7 +274,7 @@ ecrire("open-webui/publier_forgejo.py", '''
 """
 title: Publier dans Forgejo
 author: Hibou
-version: 0.3.0
+version: 0.3.1
 description: Dépose un document Markdown dans hibou-docs, sur une branche, et ouvre une pull request.
 """
 import base64, datetime, re
@@ -341,6 +341,8 @@ class Tools:
         contenu = normaliser(contenu)
         if not contenu.startswith("---"):
             return "Le document doit commencer par son en-tête YAML (modele, titre)."
+        if "<!--" in contenu:  # gabarit renvoyé tel quel : le runner le refuserait, autant le dire avant d’ouvrir la PR
+            return "Le document contient encore des consignes du template (<!-- … -->). Remplace chacune par le contenu, puis publie à nouveau."
         auteur = (__user__ or {}).get("name") or "inconnu"
         courriel = (__user__ or {}).get("email") or ""
         # Une branche par personne (redaction/<personne>/…) ; le site docs montre tout ce qui est fusionné dans main.

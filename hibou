@@ -1641,8 +1641,32 @@ verifier_speculatif() {
   fi
 }
 
+# Mise à jour sans tout redémarrer : « up » recrée ce dont la définition compose a changé ; un fichier de configuration
+# monté (charte, consignes, llama-swap.yaml…) remplacé sur le disque n’est pas vu par Docker. On compare donc l’empreinte
+# des montages de configuration avant et après, et seuls les conteneurs concernés redémarrent. Données exclues.
+empreintes_montages() {  # dossier compose → « conteneur empreinte » par montage de configuration
+  local c s
+  for c in $(cd "$1" && docker compose ps -q 2>/dev/null); do
+    docker inspect -f '{{range .Mounts}}{{if eq .Type "bind"}}{{$.Name}} {{.Source}}{{println}}{{end}}{{end}}' "$c"
+  done | while read -r c s; do
+    case "$s" in /srv/supervision/metriques*|/srv/hibou/etat*) continue ;; /srv/hibou/*|/srv/supervision/*|/srv/forgejo/Caddyfile) ;; *) continue ;; esac
+    if [[ -f "$s" ]]; then echo "${c#/} $s $(sha256sum < "$s" | cut -c1-16)"
+    elif [[ -d "$s" ]]; then echo "${c#/} $s $(find "$s" -type f -print0 | sort -z | xargs -0 -r sha256sum | sha256sum | cut -c1-16)"; fi
+  done | sort -u
+  return 0
+}
+redemarrer_montages_changes() {  # dossier empreintes_avant
+  local c n=0
+  for c in $(comm -13 <(printf '%s\n' "$2") <(empreintes_montages "$1") | cut -d' ' -f1 | sort -u); do
+    docker restart "$c" >/dev/null && n=$((n + 1)) && note "$c redémarré : sa configuration a changé."
+  done
+  (( n )) || note "Aucun fichier de configuration modifié : rien à redémarrer."
+  return 0
+}
+
 installer_gpu() {  # rôle bundle
-  local role="$1" b="$2"
+  local role="$1" b="$2" montages_avant=""
+  [[ -z "${HIBOU_MAJ:-}" ]] || montages_avant=$(empreintes_montages /srv/hibou 2>/dev/null)
   local apt_e; apt_e=$(sha256sum "$b/apt/ubuntu/Packages.gz" | cut -c1-64)
   if [[ -n "${HIBOU_MAJ:-}" && "$(cat /srv/hibou/etat/apt 2>/dev/null)" == "$apt_e" ]]; then
     HIBOU_SAUTER+=",socle"; note "Paquets inchangés : socle sauté."
@@ -1711,7 +1735,8 @@ networks:
 volumes: { comfy-sortie: {} }
 EOF
   service_demarrage /srv/hibou
-  if [[ -n "${HIBOU_MAJ:-}" ]]; then demarrer /srv/hibou --force-recreate; else demarrer /srv/hibou; fi
+  demarrer /srv/hibou
+  [[ -z "${HIBOU_MAJ:-}" ]] || redemarrer_montages_changes /srv/hibou "$montages_avant"
   verifier_speculatif
   fait "Serveur $role démarré : $NB_LLM carte(s) pour le LLM, modèle principal $PRINCIPAL. API via https://llm-$role.$DOMAINE"
 }
@@ -2042,7 +2067,8 @@ EOF
 }
 
 installer_forge() {
-  local b="$1"
+  local b="$1" montages_avant=""
+  [[ -z "${HIBOU_MAJ:-}" ]] || montages_avant=$(empreintes_montages /srv/forgejo 2>/dev/null)
   # Phase « owui », lancée par l’installation ou la mise à jour de doc ou dev : Open WebUI suit les modèles réellement
   # servis (profil changé, base de templates à remplir une fois doc en ligne), l’évaluation aussi.
   if [[ "${HIBOU_PHASE:-}" == owui ]]; then
@@ -2353,7 +2379,8 @@ EOF
         GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/hibou.json; do
       [[ ! -f /srv/supervision/grafana.env ]] || grep -q "^${reglage%%=*}=" /srv/supervision/grafana.env || echo "$reglage" >> /srv/supervision/grafana.env
     done
-    demarrer /srv/forgejo --force-recreate
+    demarrer /srv/forgejo
+    redemarrer_montages_changes /srv/forgejo "$montages_avant"
     ADMIN="$HIBOU_ADMIN_NOM"; MDP="$HIBOU_ADMIN_MDP"
     etape "Open WebUI : modèles rebranchés sur les modèles installés"
     amorcer_open_webui "$b" "" || note "Open WebUI n’a pas tout accepté : vérifie les modèles Hibou dans son espace de travail."
@@ -2759,6 +2786,7 @@ amorcer() {  # dépôt dossier : premier commit, avant la protection de main
 
 # Dépôt déjà amorcé : les outils, le workflow et les gabarits d’une nouvelle version arrivent par une pull request
 # (main est protégée et la fusion reste humaine). Rien n’est proposé si tout est déjà à jour ; PR déjà ouverte : sa branche est mise à jour.
+# La PR est ouverte au nom de hibou-redac (en-tête Sudo) : ouverte par l’administrateur, il ne pourrait pas l’approuver lui-même.
 outils_par_pr() {  # dépôt dossier_amorce
   local tmp b="hibou/outils-$VERSION_HIBOU" auth p ouverte=""
   auth="Authorization: Basic $(printf '%s:%s' "$ADMIN" "$MDP" | base64 -w0)"
@@ -2777,8 +2805,9 @@ outils_par_pr() {  # dépôt dossier_amorce
         || note "$1 : la branche $b n’a pas pu être mise à jour."
     else
     git -C "$tmp/d" -c http.extraHeader="$auth" push -q -f origin "$b" \
-      && api POST "/repos/hibou/$1/pulls" "$(jq -nc --arg b "$b" --arg v "$VERSION_HIBOU" '{head:$b, base:"main", title:("Hibou " + $v + " : mise à jour des outils"),
-           body:"Outils, workflow et gabarits de la nouvelle version du bundle. À relire et fusionner pour que le runner les utilise."}')" >/dev/null \
+      && jq -nc --arg b "$b" --arg v "$VERSION_HIBOU" '{head:$b, base:"main", title:("Hibou " + $v + " : mise à jour des outils"),
+           body:"Outils, workflow et gabarits de la nouvelle version du bundle. À relire et fusionner pour que le runner les utilise."}' \
+      | curl -fsS -u "$ADMIN:$MDP" -H "Sudo: hibou-redac" -H 'Content-Type: application/json' -X POST "http://127.0.0.1:3000/api/v1/repos/hibou/$1/pulls" -d @- >/dev/null \
       && note "$1 : outils de la version $VERSION_HIBOU proposés par pull request, à relire et fusionner." \
       || note "$1 : la pull request de mise à jour des outils n’a pas pu être ouverte."
     fi

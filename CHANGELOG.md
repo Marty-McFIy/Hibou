@@ -1,5 +1,9 @@
 # Changelog
 
+## Non publié
+- Mises à jour sans tout redémarrer : seuls les conteneurs dont un fichier de configuration a changé redémarrent (B45).
+- `hibou-docs` : la PR d'outils est ouverte au nom de hibou-redac, approuvable par un administrateur ; `publier_forgejo` refuse un gabarit non rempli (B44).
+
 ## 0.9.1
 Détail et preuves : `JOURNAL-CORRECTIONS.md` (B39 à B43).
 - Charte appliquée au maximum (B42) : documents exportés aux polices et couleurs Hibou (Fraunces, Inter, JetBrains Mono, code en terminal nuit), lueur de l'invite, Fraunces limitée aux titres, focus du site docs ; rédacteurs au tutoiement et étapes à l'infinitif (B43).

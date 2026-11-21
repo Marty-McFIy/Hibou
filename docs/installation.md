@@ -35,6 +35,7 @@ Le menu demande :
 | Stockages | disques des VM, sauvegardes |
 | Cartes de dev et de doc | modèle et nombre ; le profil conseillé suit la mémoire vidéo |
 | Génération d’images | « Non », ou une carte dédiée |
+| Carte de recherche (doc) | « Oui » si l’hôte doc a une petite carte en plus (4 à 8 Go) : elle porte les embeddings et le reranker au lieu de ralentir le LLM |
 | Miroir | versions de Python, listes pip, npm, git, images Docker |
 | Documentation de sécurité | « Oui » : guides de l’ANSSI (environ 170 Mo) et tes textes de référence (`securite.d/autres.txt`, `securite.d/ajouts/`) pour la base « Hibou · Sécurité » |
 | Administrateur, utilisateurs | dans l’ordre de priorité ; équipes doc, dev ou les deux |
@@ -100,12 +101,15 @@ Si doc est installé après forge (cas normal), relance une fois `./hibou mettre
 ```
 
 Seul ce qui a changé est copié et rechargé ; comptes, dépôts, conversations et sessions de l’agent sont conservés.
+Ensuite : `./hibou diagnostic` sur chaque hôte et `./hibou essai` sur l’hôte de forge.
 Pour changer de cartes ou de profil : « Changer seulement les cartes et les modèles » au menu de `telecharger`.
 
 ## 7. Dépannage
 
 | Symptôme | Que faire |
 | --- | --- |
+| Quelque chose ne va pas, sans savoir quoi | `./hibou diagnostic` sur l’hôte : un rapport sans secret dans `/root`, à joindre à un ticket |
+| Un secret a pu être vu | `./hibou renouveler-secrets` sur l’hôte de forge : nouvelles clés, anciens jetons révoqués |
 | Une étape échoue | Lis le message, corrige, relance la même commande : les étapes faites sont rapides. `HIBOU_SAUTER=vm,copie` pour en sauter. |
 | « Service(s) qui redémarrent en boucle » | `docker compose -f /srv/forgejo/compose.yaml logs --tail 50 <service>` sur forge |
 | Le chat ne répond pas | `curl http://<ip-doc>:8080/health` depuis forge ; depuis ailleurs, c’est refusé (pare-feu) |

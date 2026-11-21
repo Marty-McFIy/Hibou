@@ -1,4 +1,6 @@
-hibou-bundle-*/
-.venv-hf/
-*.tar.zst
 *.gguf
+*.pyc
+*.tar.zst
+.venv-hf/
+__pycache__/
+hibou-bundle-*/

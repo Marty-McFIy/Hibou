@@ -519,6 +519,135 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 - Test : `mettre-a-jour forge` n° 58 ; base : `embedding_batch_size 16`, `embedding_concurrent_requests 4` ; reprise « 179 documents, 9 déjà dans la base, 170 à ajouter » ;
   sur 10 min : 0 refus, 0 réponse 429, un document toutes les ~20 s. **Prouvé.**
 
+## B52 — Mise à jour d'une page refusée par le runner (liste coupée par un bloc de code)
+- Constat (test réel de B50) : alice demande d'ajouter une étape à une procédure publiée ; `lire_document` puis `mettre_a_jour_document` ouvrent la PR n° 11
+  au nom d'alice (compte hibou-redac), mais le runner échoue : `MD029/ol-prefix [Expected: 1; Actual: 4]`. Le bloc de code sous l'étape 3, non indenté, ferme la liste ;
+  l'étape « 4. » ouvre une nouvelle liste (le site l'aurait aussi numérotée 1).
+- Diff : `normaliser()` (publier_forgejo 0.4.1) indente sous l'étape numérotée qui le précède tout bloc de code placé juste après elle.
+- Test : exemple passé au markdownlint du runner (0 problème) ; même demande par alice : PR n° 12, blocs indentés, runner **success**. **Prouvé.**
+- Relecteur, VM dev arrêtée : avis « Relecture automatique impossible … La relecture humaine reste nécessaire » posté dans la PR (B23 tient).
+
+## B53 — Mise à jour de forge pendant le chargement de la base sécurité : 59 documents refusés (401)
+- Constat : `amorcer_open_webui` renouvelle la clé d'API d'Open WebUI à chaque passage, ce qui révoque l'ancienne ; le chargeur en cours l'utilise encore :
+  « 111 ajouté(s), 59 échec(s) », tous `HTTP Error 401`. La relance n'a eu lieu que parce que le chargeur avait fini d'échouer avant le test `is-active` (course).
+- Diff : arrêt du chargeur avant le renouvellement de la clé, relance systématique (il reprend où il s'est arrêté) ; `docker run --init` : sans lui, le chargeur
+  (PID 1 du conteneur) ignorait SIGTERM et systemd attendait 90 s avant SIGKILL.
+- Test : deux `mettre-a-jour forge` en plein chargement : arrêt dans la seconde (status 143), reprise « 146 déjà dans la base, 33 à ajouter », 0 erreur 401, un seul chargeur. **Prouvé.**
+
+## B54 — Rotation des secrets impossible : anciens jetons jamais révoqués, clé des modèles figée dans Open WebUI (tâche 3)
+- Constats : `configurer` crée un jeton à chaque passage sans révoquer les précédents (hibou-dev : 2 jetons `opencode-…` actifs, dont celui affiché pendant l'essai) ;
+  Open WebUI garde `openai.api_keys` et `rag.openai.api_key` en base (lus de l'environnement au premier démarrage seulement) : une nouvelle clé l'aurait coupé des modèles.
+- Diff : `jeton_neuf` (nouveau jeton, puis révocation des jetons du même usage) pour hibou-dev, hibou-redac, hibou-relecteur ; `amorcer_open_webui` impose la clé
+  par l'API (`/openai/config/update`, `openai_config.key`) ; commande **`hibou renouveler-secrets`** (hôte Proxmox) : nouvelles clés (Open WebUI, OpenCode, relecteur,
+  clés personnelles), `secrets.chiffre` rechiffré avec la même phrase et son empreinte mise à jour, puis forge (`configurer` rejoué : jetons, 4 applications OAuth,
+  secret du webhook, cookie OpenCode) et doc/dev en marche ; une VM arrêtée est signalée. Mots de passe des personnes, phrase et clés SSH inchangés (dit à la fin).
+- Test : avant : jetons `opencode×2`, `open-webui×2` ; après (413 s, rc=0) : un jeton neuf par compte, 4 applications OAuth recréées (identifiants changés),
+  Open WebUI, relecteur et Grafana redémarrés ; `hibou essai` : 14 OK (connexion au chat, à OpenCode et à Grafana avec les nouveaux secrets, chat, RAG, export, runner) ;
+  alice se connecte et obtient une réponse. dev arrêtée : signalée, à mettre à jour à son démarrage. **Prouvé.**
+
+## B55 — Export PDF cassé après une mise à jour (régression de B45)
+- Constat (trouvé par `hibou essai`) : « la bibliothèque fpdf n'est pas disponible ». `/app/hibou-py` vide dans le conteneur alors que `/srv/hibou/owui-py` est plein :
+  chaque passage faisait `rm -rf` puis recréait le dossier monté ; depuis B45, Open WebUI n'est plus redémarré si le contenu est identique et garde l'ancien dossier, supprimé.
+- Diff : extraction dans un dossier temporaire puis `rsync --delete` vers le dossier monté (même inode) ; en mise à jour, Open WebUI est redémarré s'il ne voit pas `fpdf`
+  (répare les installations touchées).
+- Test : `mettre-a-jour forge` n° 64 : « Open WebUI redémarré : il ne voyait plus les modules d'export », `fpdf 2.9.0` importable ; inode 1773810 identique après
+  la rotation (mise à jour complète) ; essai : export PDF téléchargé, PDF valide. **Prouvé.**
+
+## B56 — Un guide de l'ANSSI jamais indexé (titre en double)
+- Constat : 179 documents, 178 dans la base ; « Sauvegarde des systèmes d'information » désigne deux guides (Fondamentaux, Essentiels). Le chargeur nomme le fichier
+  d'après le titre et prenait le second pour un doublon.
+- Diff : l'index numérote les titres en double (« … (2) ») ; `systemd-run --quiet` (plus de « Running as unit » dans la sortie).
+- Test : `telecharger` (partie securite) puis `mettre-a-jour forge` : « 178 déjà dans la base, 1 à ajouter », ajouté en 2 s. Base : 179 documents. **Prouvé.**
+
+## F4 — `hibou diagnostic` (tâche 4)
+- Sur l'hôte Proxmox, sans rien modifier : stockages, quorum du cluster, cartes en vfio-pci, dernière sauvegarde de forge (< 26 h) ; par VM : marche, SSH, disque,
+  conteneurs `hibou-*` arrêtés ou en boucle ; forge : Forgejo, Open WebUI, 6 sites HTTPS, expiration de l'autorité Hibou, base sécurité, forge → doc/dev ; doc/dev : cartes vues, API.
+  Rapport sans secret `/root/hibou-diagnostic-<date>.txt`, code 1 en cas d'échec.
+- Test : 23 OK, 2 attentions (dev arrêtée) ; ntfy arrêté exprès : « ÉCHEC VM forge : conteneurs arrêtés ou en boucle (hibou-forge-ntfy-1:exited) », code 1. **Prouvé.**
+
+## F12 — `hibou essai` : essai de bout en bout automatisé (tâche 12)
+- Compte Forgejo temporaire (équipes doc et dev), puis, comme une personne : connexion au chat par Forgejo, modèles visibles, chat, réponse sourcée (documentation,
+  sécurité), export PDF téléchargé et vérifié, connexion à OpenCode et à Grafana, PR de documentation, runner, relecture (attendue « impossible » si dev est arrêtée),
+  instance OpenCode de chaque développeur ; ménage (comptes Forgejo, chat, Grafana ; PR fermée, branche supprimée). Rapport sans secret, code 1 en cas d'échec.
+- Premier passage : a trouvé B55 (export) ; deux défauts de l'essai lui-même corrigés (page « Pas d'espace OpenCode » attendue pour un compte sans instance ;
+  question générale sans recherche → question qui déclenche la recherche).
+- Test : 14 OK en 1 min avant et après la rotation des secrets. **Prouvé.**
+
+## F1 — Cartes de doc en production : carte de recherche à part (tâche 1)
+- Constat : sur un hôte doc à quatre cartes de 8 Go et une petite carte de 4 Go, toutes les cartes NVIDIA passent à la VM et `indices_gpu` les donne toutes au LLM :
+  `--tensor-split 1,1,1,1,1`, l'A400 (4 Go, plus lente) reçoit un cinquième des couches : ralentissement et risque de manque de mémoire.
+- Diff : question du menu « Une petite carte à part pour la recherche documentaire ? » (`HIBOU_RAG_GPU/GO/NB`) ; la carte est retirée du partage des couches et porte
+  les embeddings (`-ngl 99` au lieu du processeur) ; chaque modèle est épinglé à ses cartes par UUID (`env: CUDA_VISIBLE_DEVICES`), CUDA renumérotant les cartes dans le conteneur.
+- Test à blanc (faux nvidia-smi, 4 RTX 4000 + A400 en position 2) : LLM `["0","1","3","4"]`, `tensor-split 1,1,1,1` ; embeddings sur l'A400 seule ; sans l'option,
+  `1,1,1,1,1` (défaut reproduit). llama-swap de l'image livrée : « Executing start command … env: CUDA_VISIBLE_DEVICES=… » (clé `env` prise en compte).
+  À valider sur le matériel de production (`hibou essai`, `hibou-eval`).
+
+## B57 — Mise à jour avec doc arrêtée : trace Python et message trompeur
+- Constat : `mettre-a-jour dev` (doc arrêtée, une seule carte sur l'hôte d'essai) : `urllib.error.HTTPError: HTTP Error 400` puis « Clé du runner ou synchronisation refusée ».
+  Cause réelle : doc calcule les embeddings ; sans elle, Open WebUI refuse l'envoi de la documentation. Même cas à toute installation neuve (forge avant doc),
+  et le chargeur de la base sécurité aurait échoué sur ses 179 documents.
+- Diff : clé du runner toujours mise à jour (elle vient d'être renouvelée) ; envoi de la documentation et chargement de la base sécurité seulement si doc répond,
+  sinon un message dit pourquoi et quand cela se fera (mise à jour de doc, prochaine fusion).
+- Test : `mettre-a-jour forge` n° 66, doc arrêtée : les deux messages, aucune trace, rc=0. **Prouvé.**
+
+## B58 — L'agent ouvre une pull request vide
+- Constat (test réel de `forgejo-tickets`, dépôt d'essai avec le ticket n° 1 « Ajouter une fonction soustraire ») : l'agent d'alice lit le ticket
+  (`forgejo-tickets`), écrit la fonction et passe pytest, puis appelle `forgejo-pr` avec « Closes #1 » **sans avoir commité** : PR n° 2 vide (0 fichier), non fusionnable.
+- Diff : `forgejo-pr` refuse s'il reste des fichiers suivis modifiés (« git add … && git commit », puis relancer) ou si la branche n'a aucun commit de plus que main ;
+  il signale les fichiers non suivis absents de la PR.
+- Test : dépôt jetable : modifié non commité → refus rc=1 ; aucun commit → refus rc=1 ; commit + fichier non suivi → avertissement puis push. Image OpenCode reconstruite,
+  `mettre-a-jour forge` n° 67 ; second passage de l'agent : commit puis PR n° 3 (`calcul.py` +3). Le 4B a oublié cette fois « Closes #1 » et le test (variabilité du modèle,
+  consignes en place) ; « Closes #1 » ajouté à la main, fusion : ticket n° 1 fermé. Dépôt d'essai supprimé. **Prouvé** (outil) ; agent 4B : limites connues.
+
+## B59 — Les documents joints au chat n'arrivaient jamais au modèle
+- Constat (test de l'import, tâche 8) : un `.docx` joint est bien extrait (433 caractères) mais le modèle répond « je ne vois aucun fichier ». Open WebUI 0.13 ne donne
+  le texte d'un fichier joint qu'aux modèles qui ont la capacité `file_context` (`is_file_context_enabled`) ; sinon le modèle doit le lire par ses outils, ce que le 4B ne fait pas.
+  Touchait tous les modèles Hibou, rédacteurs compris (« des notes, des captures ou des documents »).
+- Diff : `modele_owui` ajoute `capabilities.file_context: true` à chaque modèle de chat ; `hibou essai` contrôle désormais un fichier joint (code aléatoire à retrouver).
+- Test : import du `.docx` : source `impression.docx`, contenu repris ; essai : « Fichier joint lu par le modèle » OK. **Prouvé.**
+
+## F6 — Recherche hybride et reranker (tâche 6)
+- Diff : reranker `ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF` (640 Mo) servi par llama-swap sur doc (`--reranking`, groupe `rag`, masqué du sélecteur), branché à Open WebUI
+  en reranker externe (`/v1/rerank` via le service de priorité, qui ne met en file que la génération) ; recherche hybride (BM25 + sens), 20 candidats, 5 retenus.
+  **Seulement avec la carte de recherche (F1)** : mesuré sur le processeur de l'hôte d'essai, reranker 87 tokens/s (44 s pour 5 extraits, 166 à 562 s par question),
+  et la recherche hybride sans reranker recalcule les embeddings des candidats (~8 s chacun, essai en 11 min). Sans carte : recherche par le sens seule, comme avant.
+- Test (forcé sur le processeur, `HIBOU_RERANKER=1`) : `/v1/rerank` classe le bon passage à 0,998 et les autres à 0 ; Open WebUI : « Starting hybrid search »,
+  « ExternalReranker:predict:model qwen3-reranker » ; essai 16 OK. Puis option retirée du menu sans carte, essai revenu à 1 min (17 OK). Sur carte : à mesurer sur le matériel de production.
+
+## F7 — Relecteur appuyé sur les guides de l'ANSSI (tâche 7)
+- Diff : le relecteur interroge la base « Hibou · Sécurité » (`/api/v1/retrieval/query/collection`, 4 extraits) avec les fichiers et les lignes ajoutées du diff, joint
+  les extraits au prompt et cite le guide entre crochets ; clé et base relues à chaque relecture dans `securite.env` monté en lecture seule (créé vide sans la base) ;
+  mention « avec les guides de l'ANSSI » dans l'avis. Sans base ou si elle ne répond pas, relecture comme avant.
+- Test (dev arrêtée : relecteur pointé un temps sur doc, même modèle 4B, puis rétabli) : PR avec `PermitRootLogin yes`, `PasswordAuthentication yes`, MD5 et `verify=False` :
+  9 remarques, dont 6 citent un guide (« [ANSSI · Usage sécurisé d'(Open)SSH] » pour les directives SSH) ; deux attributions approximatives du 4B (MD5 rattaché au guide
+  GNU/Linux, `verify=False` au guide SSH). **Prouvé** ; précision à revoir avec le modèle de production.
+
+## F8 — Import d'un document existant (tâche 8)
+- Diff : modèle « Hibou · Import d'un document » : reçoit la liste des gabarits et de leurs sections (lue dans le bundle), choisit le plus proche, reprend le contenu fidèlement,
+  en-tête YAML exact, sections remplies, « À compléter » seulement si le document ne dit rien, liste de ce qui a été déplacé, publication sur accord. Sans la base des gabarits
+  (le 4B recopiait leurs commentaires `<!-- -->`).
+- Test (alice, `.docx` libre « Redémarrage du serveur d'impression ») : premier jet sans en-tête et avec les commentaires du gabarit ; après la consigne : en-tête correct,
+  Objet, Prérequis, 5 étapes à l'infinitif, Vérification, Retour arrière, toutes tirées du document. Chemin proposé sans le dossier `procedures/` (le 4B), publication non faite.
+
+## F10 — Notifications d'équipe par ntfy (tâche 10)
+- Diff : le relecteur publie dans le sujet `hibou-pr` : « PR à relire » (ouverture), « Relecture prête » ou « Relecture impossible », avec le lien ; Caddy ouvre
+  l'interface ntfy (`alertes.<domaine>`) aux équipes doc et dev, le sujet `hibou` (alertes des serveurs, dont « Sauvegarde en retard », déjà existante) restant aux administrateurs.
+- Test : sujet `hibou-pr` : « PR à relire », « Relecture impossible », « Relecture prête » ; essai (compte doc/dev) : notification de sa PR trouvée, sujet `hibou` → HTTP 403. **Prouvé.**
+
+## F11 — Usage par personne dans Grafana (tâche 11)
+- Diff : tokens lus et générés comptés par personne (le service de priorité ne comptait que les requêtes et l'attente) ; tableau « LLM en direct » : rangée « Usage par personne »
+  (tokens générés et lus sur 7 jours, tokens générés par heure) ; débits recalculés par modèle.
+- Test : image du service de priorité reconstruite, `mettre-a-jour doc` : `hibou_llm_tokens_generes_total{modele="qwen3.5-4b",utilisateur="alice"} 48`. **Prouvé** (panneaux affichés au prochain passage de Prometheus).
+
+## F13 — Contrôles automatiques sur GitHub (tâche 13)
+- Workflow `.github/workflows/controles.yml` : `bash -n` et `shellcheck -S error` du script, compilation des Python des amorces et du miroir, JSON des amorces et de la charte,
+  autotests du relecteur et du service de priorité, `hibou autotest`. Rejoué en local : tout passe. Fichiers `__pycache__` publiés par erreur retirés, `.gitignore` complété.
+
+## F2, F5 — Mise en production et cluster à deux nœuds (tâches 2 et 5)
+- `docs/mise-en-production.md` (GitHub) : liste de contrôle ordonnée (matériel et BIOS, bundle, installation, sécurité, sauvegarde, mise en service), chaque point vérifiable
+  par une commande ; cluster à deux nœuds : témoin QDevice (`corosync-qnetd`, `pvecm qdevice setup`), placement des VM, réplication ZFS + HA ou stockage partagé pour forge,
+  `pvecm expected 1` en dernier recours.
+
 ## Écarts de charte non corrigés (décision ou limite)
 - Open WebUI : « Connectez-vous à Hibou (Open WebUI) » : la mention « (Open WebUI) » est imposée par sa licence ; textes français au vouvoiement (« Comment puis-je vous aider aujourd'hui ? »),
   compilés dans des fichiers JavaScript au nom changeant à chaque version : non modifiés (bricolage fragile).

@@ -275,7 +275,7 @@ ecrire("open-webui/publier_forgejo.py", '''
 """
 title: Publier dans Forgejo
 author: Hibou
-version: 0.4.0
+version: 0.4.1
 description: Publie un document Markdown dans hibou-docs, lit un document publié ou en propose une nouvelle version, toujours par pull request.
 """
 import base64, datetime, re
@@ -288,24 +288,34 @@ URL_NUE = re.compile(r"(?<![<(`\\[])\\bhttps?://[^\\s<>()`]+[^\\s<>()`.,;:!?]")
 
 def normaliser(md: str) -> str:
     """Règles du runner (markdownlint) qu'un petit modèle oublie : langage et lignes vides autour des blocs de code,
-    adresses nues entre chevrons, un seul saut de ligne final. Le texte lui-même n'est pas touché."""
-    sortie, dans_bloc, fermeture = [], False, ""
+    adresses nues entre chevrons, un seul saut de ligne final. Un bloc de code placé sous une étape numérotée est
+    indenté sous elle : sinon la liste s'arrête au bloc et l'étape suivante (« 4. ») est refusée (MD029) et mal
+    numérotée sur le site. Le texte lui-même n'est pas touché."""
+    sortie, dans_bloc, fermeture, etape, retrait = [], False, "", "", ""
     lignes = md.replace("\\r\\n", "\\n").split("\\n")
     for i, l in enumerate(lignes):
         m = re.match(r"^(\\s*)(`{3,}|~{3,})(.*)$", l)
         if m and not dans_bloc:
             dans_bloc, fermeture = True, m.group(2)
+            retrait = etape if not m.group(1) else ""
             if sortie and sortie[-1].strip():
                 sortie.append("")
-            sortie.append(l if m.group(3).strip() else f"{m.group(1)}{m.group(2)}text")
+            sortie.append(retrait + (l if m.group(3).strip() else f"{m.group(1)}{m.group(2)}text"))
             continue
         if m and dans_bloc and m.group(2).startswith(fermeture[0]) and len(m.group(2)) >= len(fermeture) and not m.group(3).strip():
             dans_bloc = False
-            sortie.append(l)
+            sortie.append(retrait + l)
             if i + 1 < len(lignes) and lignes[i + 1].strip():
                 sortie.append("")
             continue
-        if not dans_bloc:
+        if dans_bloc:
+            l = retrait + l if l.strip() else l
+        else:
+            n = re.match(r"^\\d+\\.\\s+", l)
+            if n:
+                etape = " " * len(n.group(0))
+            elif l.strip() and not l.startswith((" ", "\\t")):
+                etape = ""
             # Hors code en ligne : les segments entre accents graves restent tels quels.
             l = "`".join(p if k % 2 else URL_NUE.sub(lambda u: f"<{u.group(0)}>", p) for k, p in enumerate(l.split("`")))
         sortie.append(l)

@@ -31,6 +31,9 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Pare-feu | Les ports des serveurs GPU ne s’ouvrent qu’à forge (nftables) | Validé |
 | Réseau isolé | DNS et heure servis par forge, autorité de certification interne, TLS partout | Validé |
 | Supervision des autres nœuds | `hibou installer noeud` | À valider |
+| Diagnostic | `hibou diagnostic` : stockages, quorum, cartes, sauvegarde, VM, conteneurs, sites, certificats ; rapport sans secret | Validé |
+| Essai de bout en bout | `hibou essai` : compte temporaire, connexion par Forgejo au chat, à OpenCode et à Grafana, réponses sourcées, fichier joint, export, PR, runner, relecture, notifications ; 17 contrôles en 1 min | Validé |
+| Rotation des secrets | `hibou renouveler-secrets` : nouvelles clés d’API, jetons des comptes de service (anciens révoqués), applications de connexion, secret du webhook | Validé |
 
 ## 3. Serveurs de modèles (doc et dev)
 
@@ -45,6 +48,8 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Décodage spéculatif | Petit modèle d’ébauche pour accélérer le 27B de dev (option du menu) | À valider |
 | Génération d’images | ComfyUI sur une carte dédiée (option du menu) | À valider |
 | Fonctionnement sans AVX2 | Serveur, embeddings et complétion sur processeur ancien | Validé |
+| Carte de recherche | Une petite carte à part porte les embeddings et le reranker, hors du partage des couches du LLM ; chaque modèle épinglé à ses cartes | À valider sur matériel (essai à blanc fait) |
+| Recherche hybride et reranker | Mots-clés et sens, puis tri des extraits par un reranker (Qwen3-Reranker 0.6B) ; actif avec la carte de recherche | Validé sur processeur (trop lent sans carte) |
 
 ## 4. Chat et rédaction (Open WebUI, `chat.<domaine>`)
 
@@ -57,6 +62,8 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Documentation interne | Modèle qui répond à partir de la documentation fusionnée, avec ses sources | Validé |
 | Compression du contexte | Une conversation trop longue est résumée automatiquement au lieu d’échouer ; les derniers messages restent intacts. Bouton « Compression du contexte » dans le menu « + » (actif par défaut) et réglage personnel « Ne jamais compresser » | Validé |
 | Base « Hibou · Sécurité » (option) | Guides et recommandations de l’ANSSI récupérés à la préparation du bundle, plus tes textes de référence (IGI 1300, II 901…) ; modèle « Hibou · Sécurité » qui cite le guide utilisé | Validé (indexation en tâche de fond) |
+| Import d’un document | Modèle « Hibou · Import d’un document » : un Word ou un PDF repris fidèlement dans le gabarit le plus proche, puis proposé par PR | Validé |
+| Documents joints | Le texte d’un fichier joint au message est donné au modèle | Validé |
 | Mise à jour d’un document publié | Lire un document de la documentation et en proposer une nouvelle version par pull request | Validé (outil installé) |
 | Espace personnel | Conversations et fichiers propres à chaque compte : personne ne voit ceux des autres | Validé |
 | Charte Hibou | Thème nuit et brume, polices, logo, écran de démarrage, suggestions, modèle par défaut ; contrastes AA dans les deux thèmes | Validé (textes d’Open WebUI au vouvoiement) |
@@ -69,7 +76,8 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Hors ligne | pip et npm passent par le miroir de Forgejo, pytest fourni, consignes adaptées | Validé |
 | Nouveau projet en une commande | `forgejo-nouveau-depot` crée le dépôt, protège `main`, le clone, pose un `.gitignore` | Validé |
 | Pull request en une commande | `forgejo-pr` pousse la branche `agent/<sujet>` et ouvre la PR, « Demandé par @<personne> » | Validé |
-| Tickets | `forgejo-tickets` liste les tickets ouverts du projet ; « Closes #n » dans la PR les ferme à la fusion | Validé (commande installée) |
+| Tickets | `forgejo-tickets` liste les tickets ouverts du projet ; « Closes #n » dans la PR les ferme à la fusion | Validé |
+| Jamais de PR vide | `forgejo-pr` refuse s’il reste des modifications non commitées ou si la branche n’a aucun commit | Validé |
 | Garde-fous | `main` protégée partout, pas de création de dépôt par push, refus d’office : `sudo`, `apt`, `rm -rf .git`, affichage des secrets… | Validé |
 | Compaction automatique | OpenCode résume la session quand elle approche de la limite du modèle | Validé |
 
@@ -79,6 +87,7 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | --- | --- | --- |
 | Organisation prête | Équipes `dev`, `doc`, `relecture` ; comptes des utilisateurs et des agents ; dépôts `hibou-infra`, `hibou-docs`, `hibou-eval` amorcés et protégés | Validé |
 | Relecteur automatique | Chaque pull request reçoit un avis consultatif du LLM de dev ; s’il est indisponible, la PR le dit | Validé |
+| Relecture appuyée sur l’ANSSI | Avec la base sécurité, le relecteur joint les recommandations proches du code et cite le guide | Validé |
 | Contrôle des documents | Runner Forgejo Actions : style Markdown, sections du modèle, schémas Mermaid | Validé |
 | Fusion humaine | Une approbation requise, push direct sur `main` refusé | Validé |
 | Site de documentation | `docs.<domaine>` (MkDocs, charte Hibou), reconstruit à chaque fusion ; tout ce qui est fusionné y apparaît | Validé |
@@ -89,8 +98,10 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 
 | Fonctionnalité | Détail | État |
 | --- | --- | --- |
-| Grafana | « Vue d’ensemble », « LLM en direct » (file, contexte utilisé, tokens/s), « Évaluation » ; connexion par Forgejo | Validé (tableaux en place, connexion non essayée) |
-| Alertes | Prometheus, Alertmanager, notifications ntfy (`alertes.<domaine>`), page d’état Uptime Kuma (`etat.<domaine>`) | Validé (en place) |
+| Grafana | « Vue d’ensemble », « LLM en direct » (file, contexte utilisé, tokens/s), « Évaluation » ; connexion par Forgejo | Validé |
+| Alertes | Prometheus, Alertmanager, notifications ntfy (`alertes.<domaine>`, sujet `hibou`, administrateurs), page d’état Uptime Kuma (`etat.<domaine>`) | Validé (en place) |
+| Notifications d’équipe | Sujet ntfy `hibou-pr` : PR à relire, relecture prête ou impossible ; ouvert aux équipes doc et dev | Validé |
+| Usage par personne | Tokens lus et générés par personne sur 7 jours, dans « LLM en direct » : pour dimensionner les cartes | Validé |
 | Évaluation des modèles | `hibou-eval` chaque dimanche : code, rédaction, vision ; scores dans Grafana ; une erreur d’API compte 0 | Validé |
 | Sauvegardes | vzdump de forge chaque nuit (7 jours, 4 semaines) et export Forgejo ; une sauvegarde manuelle compte aussi | Validé (restauration complète, données intactes) |
 | Connexion à Proxmox par Forgejo | Domaine OpenID `forgejo`, administrateur Hibou administrateur de Proxmox | Validé (connexion complète) |

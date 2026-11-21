@@ -6,7 +6,8 @@
   <h1>HIBOU</h1>
   <p><strong>Deux IA locales, documentation et développement, installées d’un seul script dans un réseau sans Internet.</strong></p>
   <p>
-    <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.9.1-F2B544" alt="Version 0.9.1"></a>
+    <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.9.2-F2B544" alt="Version 0.9.2"></a>
+    <a href="https://github.com/Marty-McFIy/Hibou/actions/workflows/controles.yml"><img src="https://github.com/Marty-McFIy/Hibou/actions/workflows/controles.yml/badge.svg" alt="Contrôles"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-2F3B52" alt="Licence MIT"></a>
     <img src="https://img.shields.io/badge/Proxmox%20VE-9-0F1420" alt="Proxmox VE 9">
     <img src="https://img.shields.io/badge/Ubuntu-26.04-0F1420" alt="Ubuntu 26.04">
@@ -44,6 +45,7 @@
 
 | Version | Date | Contenu | Notes |
 | --- | --- | --- | --- |
+| `v0.9.2` | 22/11/2026 | Essai de bout en bout et diagnostic en une commande, rotation des secrets, carte de recherche (embeddings, reranker), relecteur appuyé sur l’ANSSI, import de documents, base sécurité, notifications d’équipe | [notes](docs/notes-de-version/v0.9.2.md) · [preuves](JOURNAL-CORRECTIONS.md) |
 | `v0.9.1` | 21/11/2026 | Charte appliquée au maximum (exports, chat, site docs), connexion Grafana réparée, thèmes générés publiés | [changelog](CHANGELOG.md) · [preuves](JOURNAL-CORRECTIONS.md) |
 | `v0.9.0` | 21/11/2026 | Installation complète validée sur une machine réelle ; profil 4 Go, export de documents, compression du contexte, OpenCode par personne | [notes](docs/notes-de-version/v0.9.0.md) · [preuves](JOURNAL-CORRECTIONS.md) |
 | `v0.1.0` | 16/11/2026 | Script, charte, architecture | [changelog](CHANGELOG.md) |
@@ -85,9 +87,12 @@ Sur chaque hôte Proxmox, en root, disque branché :
 ./hibou installer doc                     # hôte des cartes doc
 ./hibou installer dev                     # hôte des cartes dev
 ./hibou mettre-a-jour <rôle>              # plus tard : n’apporte que ce qui a changé
+./hibou diagnostic                        # contrôle tout ce qui tourne sur cet hôte
+./hibou essai                             # essai de bout en bout (hôte de forge)
+./hibou renouveler-secrets                # nouvelles clés et jetons, appliqués partout
 ```
 
-Pas à pas, réponses du menu et dépannage : [docs/installation.md](docs/installation.md).
+Pas à pas, réponses du menu et dépannage : [docs/installation.md](docs/installation.md). Avant la production : [docs/mise-en-production.md](docs/mise-en-production.md).
 
 ## Organisation du dépôt
 
@@ -104,8 +109,8 @@ Pas à pas, réponses du menu et dépannage : [docs/installation.md](docs/instal
 | | |
 | --- | --- |
 | **Découvrir** | [Fonctionnalités](docs/FONCTIONNALITES.md) · [Architecture](docs/architecture.md) · [Captures](docs/captures/0.9.0) |
-| **Installer** | [Installation pas à pas](docs/installation.md) · [Aide-mémoire du bundle](docs/LISEZMOI-0.9.0.md) |
-| **Versions** | [Notes 0.9.0](docs/notes-de-version/v0.9.0.md) · [Changelog](CHANGELOG.md) · [Journal des corrections](JOURNAL-CORRECTIONS.md) |
+| **Installer** | [Installation pas à pas](docs/installation.md) · [Mise en production et cluster](docs/mise-en-production.md) · [Aide-mémoire du bundle](docs/LISEZMOI-0.9.0.md) |
+| **Versions** | [Notes 0.9.2](docs/notes-de-version/v0.9.2.md) · [Notes 0.9.0](docs/notes-de-version/v0.9.0.md) · [Changelog](CHANGELOG.md) · [Journal des corrections](JOURNAL-CORRECTIONS.md) |
 | **Charte** | [Charte graphique](charte/LISEZMOI.md) |
 | **Contribuer** | [Contribuer](CONTRIBUTING.md) · [Sécurité](SECURITY.md) |
 

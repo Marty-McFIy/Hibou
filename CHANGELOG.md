@@ -1,6 +1,15 @@
 # Changelog
 
-## Non publié
+## 0.9.2 — 22/11/2026
+Détail et preuves : `JOURNAL-CORRECTIONS.md` (B46 à B59, F1 à F13).
+- **`hibou essai`** : essai de bout en bout avec un compte temporaire (17 contrôles en 1 min) ; **`hibou diagnostic`** : contrôle d’un hôte, rapport sans secret (F12, F4).
+- **`hibou renouveler-secrets`** : nouvelles clés et jetons appliqués partout ; `configurer` révoque désormais les anciens jetons, Open WebUI reçoit la nouvelle clé des modèles (B54).
+- **Carte de recherche** sur doc : une petite carte porte embeddings et reranker au lieu de recevoir sa part des couches du LLM ; modèles épinglés par UUID (F1).
+  Recherche hybride et reranker Qwen3-Reranker avec cette carte (F6).
+- Relecteur appuyé sur les guides de l’ANSSI (F7) ; modèle « Import d’un document » (F8) ; notifications d’équipe ntfy (F10) ; usage par personne dans Grafana (F11) ;
+  contrôles automatiques sur GitHub (F13) ; guide de mise en production et de cluster à deux nœuds.
+- Corrections : documents joints jamais transmis au modèle (B59) ; export PDF cassé après une mise à jour (B55) ; PR vide de l’agent (B58) ; page refusée par le runner
+  quand un bloc de code coupe la liste (B52) ; mise à jour de forge pendant l’indexation (B53) ; guide de l’ANSSI au titre en double (B56) ; messages sans doc (B57).
 - Documentation de sécurité (option du menu) : guides de l’ANSSI et textes de référence, base et modèle « Hibou · Sécurité » (B49).
 - Bouton « Compression du contexte » dans le chat et réglage personnel « Ne jamais compresser » (B46).
 - Outils doc `lire_document`, `mettre_a_jour_document` ; commande dev `forgejo-tickets` (B50).

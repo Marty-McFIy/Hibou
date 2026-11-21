@@ -153,6 +153,8 @@ def main():
                        {"role": "user", "content": f"Sujet : {spec['sujet']}\n\nNotes : {spec['notes']}"}]
                 rep, duree, sortie = appeler(o.api, o.cle, modele, msg, contexte)
                 score, remarque, texte = noter_doc(spec, rep)
+                if rep.startswith("[erreur API"):  # pas de réponse : zéro, pas « en-tête, sections »
+                    score, remarque, texte = 0, rep[1:-1], rep
                 (rep_dir / f"doc-{t.stem}.md").write_text(texte)
                 lignes.append([jour, modele, "doc", t.stem, round(score, 2), round(duree, 1), sortie, remarque, ""])
                 print(f"  doc    {t.stem:<24} {score:4.0%}  {PIERRE}{duree:5.1f} s {remarque}{FIN}")
@@ -164,6 +166,8 @@ def main():
                                                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image}"}}]}]
                 rep, duree, sortie = appeler(o.api, o.cle, modele, msg, contexte)
                 score, remarque = noter_vision(spec, rep)
+                if rep.startswith("[erreur API"):
+                    score, remarque = 0, rep[1:-1]
                 (rep_dir / f"vision-{t.stem}.md").write_text(rep)
                 lignes.append([jour, modele, "vision", t.stem, round(score, 2), round(duree, 1), sortie, remarque, ""])
                 print(f"  vision {t.stem:<24} {score:4.0%}  {PIERRE}{duree:5.1f} s {('manque : ' + remarque) if remarque else ''}{FIN}")
@@ -181,6 +185,9 @@ def main():
         ecrire_metriques(pathlib.Path(o.metriques), o.serveur, synthese)
 
     print(f"\n{AMBRE}▸{FIN} Synthèse")
+    erreurs = sum(1 for l in lignes if str(l[7]).startswith("erreur API"))
+    if erreurs:
+        print(f"  {DANGER}{erreurs} tâche(s) sans réponse du serveur (erreur API) : scores non significatifs, vérifie le serveur avant de conclure.{FIN}")
     for m, fams in synthese.items():
         for fam, (sc, n, du, so) in fams.items():
             print(f"  {m:<20} {fam:<7} {sc / n:4.0%}  {so / du if du else 0:6.1f} tokens/s")

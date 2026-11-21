@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0 — corrections d'essai
+Détail, symptômes et preuves : `JOURNAL-CORRECTIONS.md`.
+- Profil « ≥ 4 Go » (`doc:4`, `dev:5`) : projecteur vision et complétion sur le processeur, raisonnement coupé (évaluations doc 93 %, vision 100 %, code 75 %).
+- `telecharger` : plus de bruit `debconf` (B1), premier passage des images (B2), « La garder » relit `config.env` (B3), images locales non reconstruites sans changement (B4).
+- Installation : apt lit le bundle local (B5), clé SSH de l'agent en 600 (B6), métapaquets noyau `virtual` retirés avant le pilote (B11),
+  domaine Proxmox `forgejo` modifiable (B12), pare-feu ouvert à `lo` (B13) et réappliqué en mise à jour (B14).
+- Miroir : PyPI publié fichier par fichier sans mot de passe dans les journaux (B7), dépôts git complets (B9) et acceptés par git (B10).
+- Open WebUI : base Templates remplie dès que doc répond (B8), embeddings sans 429 (B15), synchronisation de la documentation par `reset` (B16).
+- Évaluation : une erreur d'API compte 0 et est signalée (N4).
+
 ## 0.1.0
 - Script `hibou` : `telecharger`, `verifier`, `installer` (pve, forge, doc, dev).
 - Documentation : installation, architecture (document complet).

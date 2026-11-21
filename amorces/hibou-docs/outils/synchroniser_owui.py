@@ -37,9 +37,9 @@ def main(dossier):
     base = next((k for k in liste if k.get("name") == BASE), None)
     if base is None:
         base = appel("POST", "/knowledge/create", {"name": BASE, "description": "Documentation validée de hibou-docs"})
-    base = appel("GET", f"/knowledge/{base['id']}")
-    for f in base.get("files") or []:
-        appel("DELETE", f"/files/{f['id']}")
+    # Remise à zéro (fichiers et vecteurs) : GET /knowledge/{id} ne liste plus ses fichiers, la page déjà présente
+    # serait renvoyée et refusée comme doublon (400 DUPLICATE_CONTENT).
+    appel("POST", f"/knowledge/{base['id']}/reset")
     for p in pages:
         nom = str(p.relative_to(dossier)).replace("/", "--")
         appel("POST", f"/knowledge/{base['id']}/file/add", {"file_id": envoyer(nom, p.read_bytes())})

@@ -189,9 +189,20 @@ def push(a):
     # --- PyPI (twine dans un venv alimenté hors ligne depuis tools/)
     pyfiles = sorted(p for p in (d / "pypi").glob("*") if p.is_file()) if (d / "pypi").is_dir() else []
     if pyfiles and "pypi" in only:
-        run([shutil.which("twine") or "twine", "upload", "--non-interactive", "--skip-existing",
-             "--repository-url", f"{base}/api/packages/{a.owner}/pypi",
-             "-u", a.user, "-p", a.password, *pyfiles], dry)
+        # Forgejo refuse --skip-existing : un envoi par fichier, 409 = déjà présent. Mot de passe par l’environnement.
+        env = {**os.environ, "TWINE_USERNAME": a.user, "TWINE_PASSWORD": a.password}
+        ok = skipped = 0
+        for f in pyfiles:
+            r = run([shutil.which("twine") or "twine", "upload", "--non-interactive",
+                     "--repository-url", f"{base}/api/packages/{a.owner}/pypi", f], dry, env=env, check=False, capture=True)
+            text = (r.stdout or "") + (r.stderr or "")
+            if r.returncode == 0:
+                ok += 1
+            elif re.search(r"409|Conflict|already exists", text, re.I):
+                skipped += 1
+            else:
+                log(redact(f"pypi ÉCHEC {f.name}: {text.strip()[-300:]}"))
+        log(f"pypi : {ok} publiés, {skipped} déjà présents")
 
     # --- npm (npm publish de chaque tarball, versions croissantes => dist-tag latest = la plus récente)
     idx = d / "npm" / "index.json"
@@ -222,7 +233,8 @@ def push(a):
     if idx.is_file() and "git" in only:
         for e in json.loads(idx.read_text()):
             remote = f"http://{a.user}:{a.token}@{host_port}/{a.owner}/{e['name']}.git"
-            run(["git", "-C", d / e["dir"], "-c", "credential.helper=", "push", "--prune", remote,
+            # Conteneur root, dépôt monté appartenant à l’utilisateur du bundle : git exige safe.directory.
+            run(["git", "-c", f"safe.directory={(d / e['dir']).resolve()}", "-C", d / e["dir"], "-c", "credential.helper=", "push", "--prune", remote,
                  "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"], dry)
 
     # --- images Docker -> registre de conteneurs
@@ -257,7 +269,11 @@ def main():
     q.add_argument("--tmpdir"); q.add_argument("--only"); q.add_argument("--dry-run", action="store_true")
     q.set_defaults(fn=push)
 
-    a = ap.parse_args(); a.fn(a)
+    a = ap.parse_args()
+    try:
+        a.fn(a)
+    except subprocess.CalledProcessError as e:   # sans la ligne de commande brute : elle peut contenir un jeton
+        log(redact(f"ÉCHEC ({e.returncode}) : {' '.join(str(c) for c in e.cmd)}")); sys.exit(1)
 
 if __name__ == "__main__":
     main()

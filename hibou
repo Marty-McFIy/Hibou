@@ -103,8 +103,8 @@ profil() {  # rôle numéro → MODELES_ROLE, GROUPES, PRINCIPAL
         "fim|ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF|*q8_0*|8192|")
       GROUPES="  code: { swap: false, exclusive: true, members: [qwen3.5-9b, fim] }" ;;
     dev:5) MODELES_ROLE=(
-        "qwen3.5-4b|unsloth/Qwen3.5-4B-GGUF|*UD-Q4_K_XL*|16384|--cache-reuse 256"
-        "fim|ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF|*q8_0*|4096|")
+        "qwen3.5-4b|unsloth/Qwen3.5-4B-GGUF|*UD-Q4_K_XL*|16384|--cache-reuse 256 --reasoning-budget 0"   # cf. doc:4 : réflexion sans fin
+        "fim|ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF|*q8_0*|4096|-ngl 0")   # complétion sur le processeur : 4B + 1.5B Q8 dépassent 4 Go
       GROUPES="  code: { swap: false, exclusive: true, members: [qwen3.5-4b, fim] }" ;;
     doc:1) MODELES_ROLE=(
         "gemma-4-26b|unsloth/gemma-4-26B-A4B-it-GGUF|*UD-Q8_K_XL*,*mmproj*F16*|131072|"
@@ -116,7 +116,9 @@ profil() {  # rôle numéro → MODELES_ROLE, GROUPES, PRINCIPAL
       GROUPES="$rag" ;;
     doc:3) MODELES_ROLE=("qwen3.5-9b|unsloth/Qwen3.5-9B-GGUF|*UD-Q4_K_XL*|32768|" "$emb")
       GROUPES="$rag" ;;
-    doc:4) MODELES_ROLE=("qwen3.5-4b|unsloth/Qwen3.5-4B-GGUF|*UD-Q4_K_XL*,*mmproj*F16*|8192|" "$emb")
+    # Projecteur vision sur le processeur : sur 4 Go, sur la carte il fait manquer la mémoire dès un prompt de quelques milliers de tokens.
+    # Sans raisonnement : en 8k de contexte, le 4B tourne en boucle dans sa réflexion jusqu’à la limite et ne rend rien (3 tâches sur 8).
+    doc:4) MODELES_ROLE=("qwen3.5-4b|unsloth/Qwen3.5-4B-GGUF|*UD-Q4_K_XL*,*mmproj*F16*|8192|--no-mmproj-offload --reasoning-budget 0" "$emb")
       GROUPES="$rag" ;;
     *) erreur "Profil inconnu : $1 $2." ;;
   esac
@@ -1037,7 +1039,9 @@ secrets() {  # bundle ; phrase lue au clavier, ou sur l’entrée standard quand
 # ─── Installation : outils communs ──────────────────────────────────────────
 source_locale() {  # $1 = dossier apt du bundle
   echo "deb [trusted=yes] file:$1 ./" > /etc/apt/sources.list.d/hibou.list
-  APT_HIBOU=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/hibou.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0)
+  # Sandbox root : le bundle est sous ~hibou (0750 sur Ubuntu 26.04), illisible pour l’utilisateur _apt.
+  APT_HIBOU=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/hibou.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
+             -o APT::Sandbox::User=root)
   printf 'Package: *\nPin: version %s*\nPin-Priority: 1001\n' "$NVIDIA_VERSION" > /etc/apt/preferences.d/hibou-nvidia
   apt-get "${APT_HIBOU[@]}" update -qq
 }
@@ -1173,6 +1177,7 @@ delete table inet hibou
 table inet hibou {
   chain entree {
     type filter hook prerouting priority -150; policy accept;
+    iifname "lo" accept   # localhost repasse par prerouting : sans cela, le contrôle de santé du script échoue
     meta nfproto ipv6 tcp dport { 8080, 8188, 9100, 9835 } drop
     tcp dport { 8080, 8188, 9100, 9835 } ip saddr != $HIBOU_IP_FORGE drop
   }
@@ -1294,9 +1299,10 @@ realm_proxmox() {
     || { note "Forge injoignable ou pas encore configurée : connexion Proxmox par Forgejo à refaire plus tard (relance ce rôle)."; return 0; }
   printf '%s\n' "$ca" > /usr/local/share/ca-certificates/hibou.crt && update-ca-certificates >/dev/null
   id=$(sed -n 's/^PVE_ID=//p' <<< "$env"); secret=$(sed -n 's/^PVE_SECRET=//p' <<< "$env")
-  local opts=(--issuer-url "https://forge.$DOMAINE/" --client-id "$id" --client-key "$secret" --username-claim username --autocreate 1 --comment "Hibou · Forge")
+  local opts=(--issuer-url "https://forge.$DOMAINE/" --client-id "$id" --client-key "$secret" --autocreate 1 --comment "Hibou · Forge")
+  # --username-claim n’est accepté qu’à la création (realm modify le refuse : déjà créé par forge, ou cluster).
   if pveum realm list --output-format json | jq -e '.[] | select(.realm=="forgejo")' >/dev/null; then pveum realm modify forgejo "${opts[@]}"
-  else pveum realm add forgejo --type openid "${opts[@]}"; fi
+  else pveum realm add forgejo --type openid --username-claim username "${opts[@]}"; fi
   # L’administrateur Hibou administre Proxmox ; root@pam reste l’accès de secours.
   pveum user list --output-format json | jq -e --arg u "$HIBOU_ADMIN_NOM@forgejo" '.[] | select(.userid==$u)' >/dev/null \
     || pveum user add "$HIBOU_ADMIN_NOM@forgejo" --email "$HIBOU_ADMIN_MAIL"
@@ -1378,7 +1384,8 @@ copier_vers_vm() {  # rôle bundle adresse ; rsync ne transfère que ce qui a ch
     (cd "$b" && find apt/ubuntu charte amorces -type f)
     for nom in $(images_du_role "$role"); do printf 'images/%s.tar.zst\n' "$nom"; done
     for alias in $(modeles_du_role "$role"); do (cd "$b" && find "models/$role/$alias" -type f); done
-    [[ "$role" == forge && -d "$b/mirror" ]] && (cd "$b" && find mirror -type f)
+    # Dossiers vides compris : un dépôt git nu sans refs/ (références dans packed-refs) n’est plus reconnu par git.
+    [[ "$role" == forge && -d "$b/mirror" ]] && (cd "$b" && find mirror -type f -o -type d -empty)
   } > "$liste"
   etape "Copie du bundle $role vers la VM"
   # Modèles retirés du profil : effacés de la copie dans la VM, le reste n’est pas retransféré.
@@ -1486,6 +1493,8 @@ config_llama_swap() {  # rôle
       if [[ "$args" == *--embedding* ]]; then base+=" -c $ctx $args"
       else base+=" -ngl 99 $split -c $ctx -np 1 -fa on -ctk q8_0 -ctv q8_0 --jinja $args"; fi
       printf '  %s:\n    cmd: %s\n    ttl: 0\n' "$alias" "${base% }"
+      # Embeddings : Open WebUI envoie des dizaines de requêtes à la fois en indexant ; au-delà de 10, llama-swap répond 429.
+      if [[ "$args" == *--embedding* ]]; then echo "    concurrencyLimit: 64"; fi
     done
     printf 'groups:\n%s\n' "$GROUPES"
   } > /srv/hibou/llama-swap.yaml
@@ -1530,10 +1539,19 @@ verifier_speculatif() {
 installer_gpu() {  # rôle bundle
   local role="$1" b="$2"
   local apt_e; apt_e=$(sha256sum "$b/apt/ubuntu/Packages.gz" | cut -c1-64)
-  if [[ -n "${HIBOU_MAJ:-}" && "$(cat /srv/hibou/etat/apt 2>/dev/null)" == "$apt_e" ]]; then HIBOU_SAUTER+=",socle"; note "Paquets inchangés : socle sauté."; fi
+  if [[ -n "${HIBOU_MAJ:-}" && "$(cat /srv/hibou/etat/apt 2>/dev/null)" == "$apt_e" ]]; then
+    HIBOU_SAUTER+=",socle"; note "Paquets inchangés : socle sauté."
+    # Le pare-feu peut changer d’une version à l’autre sans que les paquets changent : réappliqué quand même.
+    [[ "${HIBOU_PHASE:-}" == suite ]] || pare_feu
+  fi
   if [[ "${HIBOU_PHASE:-}" != suite ]] && ! saute socle; then
     etape "Pilote NVIDIA $NVIDIA_VERSION, Docker, NVIDIA Container Toolkit"
     source_locale "$b/apt/ubuntu"
+    # Image cloud : noyau par les métapaquets « virtual ». linux-generic du bundle, souvent plus récent, les casse
+    # (linux-headers-virtual exige la même version de linux-headers-generic) et --no-remove refuserait. Retirés seuls, ils sont vides.
+    if dpkg -s linux-virtual >/dev/null 2>&1; then
+      DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq linux-virtual linux-headers-virtual linux-image-virtual >/dev/null
+    fi
     apt_hibou $PAQUETS_UBUNTU $PAQUETS_GPU
     agrandir_systeme
     verifier_dkms
@@ -2234,7 +2252,7 @@ EOF
 
 # Paquets du bundle publiés dans Forgejo (organisation hibou), depuis l’image hibou/miroir.
 importer_miroir() {  # bundle
-  local b="${1:-$ICI_HIBOU}"
+  local b="${1:-$ICI_HIBOU}" ok=1
   [[ -d "$b/mirror" ]] || { [[ "${HIBOU_MIROIR:-0}" == 1 ]] && note "Pas de dossier mirror dans le bundle : miroir sauté."; return 0; }
   exiger_root; secrets "$b"
   etape "Miroir de dépendances vers Forgejo"
@@ -2250,11 +2268,11 @@ importer_miroir() {  # bundle
   docker run --rm --network hibou-forge_default -v "$b/mirror:/m:ro" -v /var/run/docker.sock:/var/run/docker.sock \
     hibou/miroir:actuel push --dir /m --url http://forgejo:3000 --owner hibou \
     --user "$HIBOU_ADMIN_NOM" --password "$HIBOU_ADMIN_MDP" --token "$jeton" --registry "forge.$DOMAINE" \
-    || note "Une partie du miroir n’est pas passée : relis les lignes « ÉCHEC » ci-dessus, puis relance « hibou miroir »."
+    || { ok=0; note "Une partie du miroir n’est pas passée : relis les lignes « ÉCHEC » ci-dessus, puis relance « hibou miroir »."; }
   curl -fsS -u "$HIBOU_ADMIN_NOM:$HIBOU_ADMIN_MDP" -X DELETE \
     "http://127.0.0.1:3000/api/v1/users/$HIBOU_ADMIN_NOM/tokens/$(curl -fsS -u "$HIBOU_ADMIN_NOM:$HIBOU_ADMIN_MDP" \
     "http://127.0.0.1:3000/api/v1/users/$HIBOU_ADMIN_NOM/tokens" | jq -r '[.[] | select(.name | startswith("miroir-"))] | last | .id')" >/dev/null 2>&1 || true
-  fait "Paquets publiés dans Forgejo : https://forge.$DOMAINE/hibou/-/packages"
+  if (( ok )); then fait "Paquets publiés dans Forgejo : https://forge.$DOMAINE/hibou/-/packages"; fi
 }
 
 consignes_agent() {  # AGENTS.md global d’OpenCode : ton de la charte et circuit Forgejo
@@ -2502,6 +2520,8 @@ RAG_EMBEDDING_ENGINE=openai
 RAG_OPENAI_API_BASE_URL=http://$HIBOU_IP_DOC:8080/v1
 RAG_OPENAI_API_KEY=$HIBOU_CLE_WEBUI
 RAG_EMBEDDING_MODEL=qwen3-embedding
+RAG_EMBEDDING_BATCH_SIZE=16
+RAG_EMBEDDING_CONCURRENT_REQUESTS=4
 ENABLE_SIGNUP=false
 ENABLE_INITIAL_ADMIN_SIGNUP=true
 ENABLE_API_KEY=true
@@ -2652,6 +2672,7 @@ EOF
   consignes_agent
   install -d -m 700 -o 1000 -g 1000 /srv/hibou/ssh
   base64 -d <<< "$HIBOU_SSH_AGENT_B64" > /srv/hibou/ssh/id_ed25519
+  chmod 600 /srv/hibou/ssh/id_ed25519   # écrite sous umask 022 : ssh-keygen refuserait une clé en 0644
   ssh-keygen -y -f /srv/hibou/ssh/id_ed25519 > /srv/hibou/ssh/id_ed25519.pub
   local pub; pub=$(cat /srv/hibou/ssh/id_ed25519.pub)
   api GET /users/hibou-dev/keys | jq -e --arg k "${pub% *}" '.[] | select(.key | startswith($k))' >/dev/null \
@@ -2792,11 +2813,14 @@ amorcer_open_webui() {  # bundle jeton_redac
   # Base de connaissances avec les templates de hibou-docs.
   local kb f fid
   kb=$(curl -fsS "${h[@]}" "$u/knowledge/" | jq -c '(.items? // .)[] | select(.name=="Hibou · Templates")' | head -1)
-  if [[ -z "$kb" ]]; then
-    kb=$(curl -fsS "${h[@]}" "$u/knowledge/create" -d '{"name":"Hibou · Templates","description":"Templates de hibou-docs"}')
+  [[ -n "$kb" ]] || kb=$(curl -fsS "${h[@]}" "$u/knowledge/create" -d '{"name":"Hibou · Templates","description":"Templates de hibou-docs"}')
+  # Remplie tant qu’elle est vide : à la première installation de forge, les embeddings (VM doc) n’existent pas encore.
+  # GET /knowledge/{id} ne liste plus ses fichiers : on compte par /files (champ total).
+  if [[ "$(curl -fsS "${h[@]}" "$u/knowledge/$(jq -r .id <<< "$kb")/files" | jq '.total // 0')" == 0 ]]; then
     for f in "$1"/amorces/hibou-docs/templates/*.md; do
       fid=$(curl -fsS -H "Authorization: Bearer $jeton" -F "file=@$f" "$u/files/" | jq -r .id)
-      curl -fsS "${h[@]}" "$u/knowledge/$(jq -r .id <<< "$kb")/file/add" -d "{\"file_id\":\"$fid\"}" >/dev/null
+      curl -fsS "${h[@]}" "$u/knowledge/$(jq -r .id <<< "$kb")/file/add" -d "{\"file_id\":\"$fid\"}" >/dev/null 2>&1 \
+        || { note "Base « Hibou · Templates » vide : les embeddings de doc ne répondent pas. Après « installer doc », relance « hibou mettre-a-jour forge »."; break; }
     done
   fi
   profil doc "$HIBOU_PROFIL_DOC"

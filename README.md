@@ -6,7 +6,7 @@
   <h1>HIBOU</h1>
   <p><strong>Deux IA locales, documentation et développement, installées d’un seul script dans un réseau sans Internet.</strong></p>
   <p>
-    <a href="docs/notes-de-version/v0.9.0.md"><img src="https://img.shields.io/badge/version-0.9.0-F2B544" alt="Version 0.9.0"></a>
+    <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.9.1-F2B544" alt="Version 0.9.1"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-2F3B52" alt="Licence MIT"></a>
     <img src="https://img.shields.io/badge/Proxmox%20VE-9-0F1420" alt="Proxmox VE 9">
     <img src="https://img.shields.io/badge/Ubuntu-26.04-0F1420" alt="Ubuntu 26.04">
@@ -35,13 +35,15 @@
 > machine connectée, vérifié par empreintes, aux versions figées. Les IA proposent, une personne fusionne.
 
 <p align="center">
-  <img src="docs/images/architecture.svg" width="100%" alt="Architecture : machine connectée, bundle, VM forge, VM doc et VM dev">
+  <a href="docs/images/architecture.png"><img src="docs/images/architecture.png" width="100%" alt="Architecture : machine connectée, bundle, VM forge, VM doc et VM dev"></a>
+  <br><sub>Clique sur le schéma pour l’ouvrir en grand. Source vectorielle : <a href="docs/images/architecture.svg">architecture.svg</a>.</sub>
 </p>
 
 ## Versions publiées
 
 | Version | Date | Contenu | Notes |
 | --- | --- | --- | --- |
+| `v0.9.1` | 21/11/2026 | Charte appliquée au maximum (exports, chat, site docs), connexion Grafana réparée, thèmes générés publiés | [changelog](CHANGELOG.md) · [preuves](JOURNAL-CORRECTIONS.md) |
 | `v0.9.0` | 21/11/2026 | Installation complète validée sur une machine réelle ; profil 4 Go, export de documents, compression du contexte, OpenCode par personne | [notes](docs/notes-de-version/v0.9.0.md) · [preuves](JOURNAL-CORRECTIONS.md) |
 | `v0.1.0` | 16/11/2026 | Script, charte, architecture | [changelog](CHANGELOG.md) |
 

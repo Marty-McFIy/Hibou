@@ -5,7 +5,7 @@
 # Local. Isolé. Discret.
 set -euo pipefail
 
-VERSION_HIBOU="0.9.0"
+VERSION_HIBOU="0.9.1"
 
 ICI_HIBOU="$(dirname "$(readlink -f "$0")")"
 # Réponses du menu (non secrètes), posées à côté du script dans le bundle.

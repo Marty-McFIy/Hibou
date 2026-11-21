@@ -9,7 +9,7 @@
       <path d="M0,0 L10,5 L0,10 z" fill="#8A93A6"/>
     </marker>
     <style>
-      .titre { font: 600 22px Georgia, 'Fraunces', serif; fill: #E9E4D8; }
+      .titre { font: 600 22px Fraunces, Georgia, serif; fill: #E9E4D8; }
       .bloc { font: 600 16px Inter, 'Segoe UI', Roboto, sans-serif; fill: #E9E4D8; }
       .texte { font: 14px Inter, 'Segoe UI', Roboto, sans-serif; fill: #E9E4D8; }
       .doux { font: 13px Inter, 'Segoe UI', Roboto, sans-serif; fill: #8A93A6; }
@@ -82,6 +82,6 @@
   <!-- Liens forge vers doc et dev -->
   <path d="M736 340 C 780 340, 780 228, 818 228" stroke="#F2B544" stroke-width="2" fill="none" marker-end="url(#fleche)"/>
   <path d="M736 380 C 780 380, 780 476, 818 476" stroke="#F2B544" stroke-width="2" fill="none" marker-end="url(#fleche)"/>
-  <text x="744" y="528" class="doux" style="font-size:12px">API, une clé</text>
-  <text x="744" y="545" class="doux" style="font-size:12px">par personne</text>
+  <text x="742" y="528" class="doux" style="font-size:11px">API, une clé</text>
+  <text x="742" y="544" class="doux" style="font-size:11px">par personne</text>
 </svg>

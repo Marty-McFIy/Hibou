@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.1
+Détail et preuves : `JOURNAL-CORRECTIONS.md` (B39 à B43).
+- Charte appliquée au maximum (B42) : documents exportés aux polices et couleurs Hibou (Fraunces, Inter, JetBrains Mono, code en terminal nuit), lueur de l'invite, Fraunces limitée aux titres, focus du site docs ; rédacteurs au tutoiement et étapes à l'infinitif (B43).
+- Supervision : **connexion à Grafana par Forgejo réparée** (autorité Hibou conservée à chaque mise à jour), accueil sur le tableau Hibou (B39).
+- Charte : CSS d'Open WebUI 0.13 enfin chargé (nuit et brume, contrastes du thème clair), page « Accès réservé », recherche du site docs lisible (B40, B41).
+- Charte : thèmes générés (`commun`, `forgejo`, `open-webui`, `opencode`) publiés dans `charte/`, nécessaires au script.
+- `hibou-docs` : outils, gabarit Procédure et charte du site mis à jour par pull request (synchronisation du chat après fusion vérifiée).
+- README : schéma d’architecture en PNG haute définition (agrandissable), source SVG conservée.
+
 ## 0.9.0 — corrections d'essai
 Détail, symptômes et preuves : `JOURNAL-CORRECTIONS.md`.
 - Profil « ≥ 4 Go » (`doc:4`, `dev:5`) : projecteur vision et complétion sur le processeur, raisonnement coupé (évaluations doc 93 %, vision 100 %, code 75 %).
@@ -17,10 +26,7 @@ Détail, symptômes et preuves : `JOURNAL-CORRECTIONS.md`.
 - Documentation : base du chat resynchronisée depuis `main`, outils de `hibou-docs` mis à jour par pull request (B35).
 - Proxmox : connexion par Forgejo opérationnelle (résolution de forge, émetteur exact, rejouée en mise à jour) (B36).
 - Changement de profil : Open WebUI et l'évaluation suivent automatiquement doc et dev (B37) ; sauvegarde manuelle comptée (B38).
-- Charte appliquée au maximum (B42) : documents exportés aux polices et couleurs Hibou (Fraunces, Inter, JetBrains Mono, code en terminal nuit), lueur de l'invite, Fraunces limitée aux titres, focus du site docs ; rédacteurs au tutoiement et étapes à l'infinitif (B43).
 - Sauvegarde : une sauvegarde manuelle de forge met aussi la métrique à jour (B38).
-- Supervision : **connexion à Grafana par Forgejo réparée** (autorité Hibou conservée à chaque mise à jour), accueil sur le tableau Hibou (B39).
-- Charte : CSS d'Open WebUI 0.13 enfin chargé (nuit et brume, contrastes du thème clair), page « Accès réservé », recherche du site docs lisible (B40, B41).
 - Chat : **les comptes non administrateurs peuvent enfin utiliser les modèles Hibou** (droits Open WebUI 0.13, B31) ;
   **export Word, PDF, PowerPoint, Excel** téléchargeable dans la conversation (B32) ; **compression automatique** des longues conversations (B33) ;
   publication au nom de la personne, branche `redaction/<personne>/…` (B34).

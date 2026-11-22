@@ -724,6 +724,15 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 - Test : diagnostic : « ÉCHEC Serveur de modèles doc : pas d'accès aux cartes » ; `systemctl daemon-reload` dans doc (NVML : Unknown Error), `mettre-a-jour doc` sans changement
   de configuration : « hibou-doc-llama-swap-1 relancé : il avait perdu l'accès aux cartes », carte revue ; essai : 18 OK en 2 min. **Prouvé.**
 
+## B67 — Deux projecteurs de vision téléchargés ; le BF16 préféré sur des cartes Turing
+- Constat (vérification du bundle des R730) : le motif `*mmproj*F16*` prenait aussi `mmproj-BF16.gguf` (~900 Mo de trop par modèle) et le script utilisait le BF16
+  (premier par ordre alphabétique), format que les Quadro RTX 4000 (Turing) ne gèrent pas nativement.
+- Diff : motif `*mmproj-F16*` ; `mmproj()` préfère `mmproj-F16.gguf`. Fichiers BF16 retirés des deux bundles, empreintes mises à jour et vérifiées.
+- Régression introduite puis corrigée dans la foulée : `… | head -1` faisait recevoir un SIGPIPE au second `find` ; sous `pipefail`, `mettre-a-jour doc` s'arrêtait
+  en pleine configuration (« no router for requested model »). Remplacé par `sed -n 1p` (lit tout), essayé sous `set -euo pipefail`.
+- Test : A/B sur doc (llama-server temporaire, même image « KTRWB ») : BF16 et F16 lisent tous deux « KTREB » ; service doc en F16 : « KTREB » ; par Open WebUI : image transmise
+  (« SOUKU » pour « SGGKU », précision du 4B). `mettre-a-jour doc` n° 16 rc=0. **Prouvé.**
+
 ## Écarts de charte non corrigés (décision ou limite)
 - Open WebUI : « Connectez-vous à Hibou (Open WebUI) » : la mention « (Open WebUI) » est imposée par sa licence ; textes français au vouvoiement (« Comment puis-je vous aider aujourd'hui ? »),
   compilés dans des fichiers JavaScript au nom changeant à chaque version : non modifiés (bricolage fragile).

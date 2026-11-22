@@ -1,5 +1,8 @@
 # Changelog
 
+## Non publié
+- Projecteur de vision : seul le F16 est téléchargé et utilisé (le BF16 n’est pas pris en charge nativement par les cartes Turing), environ 900 Mo de moins par modèle (B67).
+
 ## 0.9.3 — 22/11/2026
 Détail et preuves : `JOURNAL-CORRECTIONS.md` (B60 à B66, F14 à F18).
 - **`hibou comptes`** : ajouter une personne, changer ses équipes ou sa priorité, la retirer (connexion bloquée), appliqué à forge, doc et dev (F14).

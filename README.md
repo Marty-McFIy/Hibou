@@ -6,7 +6,7 @@
   <h1>HIBOU</h1>
   <p><strong>Deux IA locales, documentation et développement, installées d’un seul script dans un réseau sans Internet.</strong></p>
   <p>
-    <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.9.3-F2B544" alt="Version 0.9.3"></a>
+    <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.9.4-F2B544" alt="Version 0.9.4"></a>
     <a href="https://github.com/Marty-McFIy/Hibou/actions/workflows/controles.yml"><img src="https://github.com/Marty-McFIy/Hibou/actions/workflows/controles.yml/badge.svg" alt="Contrôles"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-2F3B52" alt="Licence MIT"></a>
     <img src="https://img.shields.io/badge/Proxmox%20VE-9-0F1420" alt="Proxmox VE 9">
@@ -29,6 +29,8 @@
   et en option une base de sécurité : les guides de l’ANSSI et tes textes de référence (IGI 1300…), avec un modèle qui les cite.
 - **Une IA de développement** (`code.<domaine>`) : une instance OpenCode par développeur, hors ligne (pip et npm par
   le miroir), qui crée le dépôt, travaille sur une branche et ouvre la pull request ; autocomplétion pour les éditeurs.
+- **À la carte** : les deux IA, ou une seule (doc ou dev) selon le besoin et les cartes disponibles ; le menu ne pose
+  que les questions utiles et ne télécharge que les modèles nécessaires.
 - **Tout autour** : Forgejo (dépôts, paquets, Actions), relecture automatique de chaque pull request, site de
   documentation, file de priorité par personne, connexion unique, supervision, évaluation hebdomadaire des modèles,
   sauvegarde nocturne.
@@ -45,6 +47,7 @@
 
 | Version | Date | Contenu | Notes |
 | --- | --- | --- | --- |
+| `v0.9.4` | 22/11/2026 | doc et dev au choix (l’un, l’autre ou les deux), archive de release prête à l’emploi | [notes](docs/notes-de-version/v0.9.4.md) · [preuves](JOURNAL-CORRECTIONS.md) |
 | `v0.9.3` | 22/11/2026 | Gestion des comptes, VM sur plusieurs hôtes, pièces jointes (PowerPoint, images), miroir élargi, OpenCode sans fournisseur externe | [notes](docs/notes-de-version/v0.9.3.md) · [preuves](JOURNAL-CORRECTIONS.md) |
 | `v0.9.2` | 22/11/2026 | Essai de bout en bout et diagnostic en une commande, rotation des secrets, carte de recherche (embeddings, reranker), relecteur appuyé sur l’ANSSI, import de documents, base sécurité, notifications d’équipe | [notes](docs/notes-de-version/v0.9.2.md) · [preuves](JOURNAL-CORRECTIONS.md) |
 | `v0.9.1` | 21/11/2026 | Charte appliquée au maximum (exports, chat, site docs), connexion Grafana réparée, thèmes générés publiés | [changelog](CHANGELOG.md) · [preuves](JOURNAL-CORRECTIONS.md) |
@@ -58,8 +61,11 @@ Suite prévue : validation sur serveurs multi-cartes (24 à 96 Go), génération
 | Rôle | Où | Minimum |
 | --- | --- | --- |
 | `forge` | Un nœud Proxmox (ou un cluster) | 2 cœurs, 12 Go de RAM, 80 Go de disque |
-| `doc` | Hôte avec une ou plusieurs cartes NVIDIA en passthrough | 4 Go de mémoire vidéo |
-| `dev` | Idem, cartes distinctes de celles de doc | 4 Go de mémoire vidéo |
+| `doc` (facultatif) | Hôte avec une ou plusieurs cartes NVIDIA en passthrough | 4 Go de mémoire vidéo |
+| `dev` (facultatif) | Idem, cartes distinctes de celles de doc | 4 Go de mémoire vidéo |
+
+Au moins l’un des deux : `doc` seul (chat, rédaction, documentation), `dev` seul (agent de code, relecture, chat avec le
+modèle de code) ou les deux.
 
 Le profil de modèles suit la mémoire vidéo du serveur (plusieurs cartes s’additionnent) :
 
@@ -72,6 +78,14 @@ Le profil de modèles suit la mémoire vidéo du serveur (plusieurs cartes s’a
 | ≥ 90 Go | Qwen3-Coder-Next Q6 (256k) ou Qwen3.8 27B Q8 | — |
 
 ## Installer
+
+Télécharge la dernière [release](https://github.com/Marty-McFIy/Hibou/releases/latest) : l’archive
+`hibou-<version>.tar.gz` contient le script, le miroir, la charte et les amorces (tout ce qu’il faut), avec son empreinte.
+
+```shell
+sha256sum -c hibou-<version>.tar.gz.sha256
+tar xzf hibou-<version>.tar.gz && cd hibou-<version>
+```
 
 Sur la machine connectée (Ubuntu avec Docker), bundle sur un disque à part :
 
@@ -112,7 +126,7 @@ Pas à pas, réponses du menu et dépannage : [docs/installation.md](docs/instal
 | --- | --- |
 | **Découvrir** | [Fonctionnalités](docs/FONCTIONNALITES.md) · [Architecture](docs/architecture.md) · [Captures](docs/captures/0.9.0) |
 | **Installer** | [Installation pas à pas](docs/installation.md) · [Mise en production et cluster](docs/mise-en-production.md) · [Aide-mémoire du bundle](docs/LISEZMOI-0.9.0.md) |
-| **Versions** | [Notes 0.9.3](docs/notes-de-version/v0.9.3.md) · [Notes 0.9.2](docs/notes-de-version/v0.9.2.md) · [Notes 0.9.0](docs/notes-de-version/v0.9.0.md) · [Changelog](CHANGELOG.md) · [Journal des corrections](JOURNAL-CORRECTIONS.md) |
+| **Versions** | [Notes 0.9.4](docs/notes-de-version/v0.9.4.md) · [Notes 0.9.3](docs/notes-de-version/v0.9.3.md) · [Notes 0.9.2](docs/notes-de-version/v0.9.2.md) · [Notes 0.9.0](docs/notes-de-version/v0.9.0.md) · [Changelog](CHANGELOG.md) · [Journal des corrections](JOURNAL-CORRECTIONS.md) |
 | **Charte** | [Charte graphique](charte/LISEZMOI.md) |
 | **Contribuer** | [Contribuer](CONTRIBUTING.md) · [Sécurité](SECURITY.md) |
 

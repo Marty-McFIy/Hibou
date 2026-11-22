@@ -33,6 +33,9 @@ def envoyer(nom, contenu):
 
 
 def main(dossier):
+    if not os.environ.get("OWUI_CLE"):  # installation sans serveur doc : le chat n’a pas de base de documentation
+        print("Pas de clé du chat (secret OWUI_CLE) : base de documentation du chat non mise à jour.")
+        return
     pages = sorted(p for p in pathlib.Path(dossier).rglob("*.md") if "assets" not in p.parts)
     liste = appel("GET", "/knowledge/")
     liste = liste.get("items", liste) if isinstance(liste, dict) else liste

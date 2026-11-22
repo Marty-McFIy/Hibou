@@ -111,7 +111,7 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 
 - Symptôme : étape « Pilote NVIDIA 620.70.06, Docker, NVIDIA Container Toolkit » : `E: Packages need to be removed but remove is disabled`, puis « apt refuse l’installation ».
 - Cause : l'image cloud installe le noyau par `linux-virtual` / `linux-headers-virtual` (7.0.0-43). Le bundle apporte `linux-generic` 7.0.0-44 mais pas les « virtual » 44 ;
-  `linux-headers-virtual` 43 exige `linux-headers-generic (= 43)` : apt doit le retirer, `--no-remove` refuse. Se reproduira sur les R730 dès que le noyau du bundle dépasse celui de l'image.
+  `linux-headers-virtual` 43 exige `linux-headers-generic (= 43)` : apt doit le retirer, `--no-remove` refuse. Se reproduira en production dès que le noyau du bundle dépasse celui de l'image.
 - Diff (`installer_gpu`) : si `linux-virtual` est installé, `apt-get remove linux-virtual linux-headers-virtual linux-image-virtual` (métapaquets vides) avant `apt_hibou`. `--no-remove` garde son rôle pour le reste.
 - Test : simulation dans la VM doc : seuls ces 3 métapaquets retirés, puis plus aucun `Remv` à l'installation. `autotest` OK. `installer doc` n° 2 : « Module NVIDIA 620.70.06 compilé pour le noyau 7.0.0-44-generic ». **Prouvé.**
 
@@ -329,7 +329,7 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 - Test : conversions dans le conteneur (docx 37 Ko, pdf 26 Ko, pptx 30 Ko, xlsx 5 Ko ; PDF relu : accents, gras, listes numérotées, tableau, code).
   Page de chat en alice (`hibou-procedure`, « rédige… puis exporte-la en PDF ») : fichier attaché en 53 s, téléchargé par alice (29 Ko, `%PDF-1.3`), propriétaire alice ;
   **bob : 404** sur le même fichier. Nom sans accents translittérés corrigé (`redemarrage-…`). **Prouvé.**
-- Pistes : thème de document PowerPoint aux couleurs Hibou ; export `.odt` quand pandoc fonctionnera (R730 avec AVX2, à vérifier).
+- Pistes : thème de document PowerPoint aux couleurs Hibou ; export `.odt` quand pandoc fonctionnera (processeur avec AVX2, à vérifier).
 
 ## B33 — Compression du contexte dans le chat (doc)
 - Constat (mesure directe) : au-delà du contexte, llama-server refuse (`exceed_context_size_error`) ; Open WebUI ne compresse rien.
@@ -725,13 +725,32 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
   de configuration : « hibou-doc-llama-swap-1 relancé : il avait perdu l'accès aux cartes », carte revue ; essai : 18 OK en 2 min. **Prouvé.**
 
 ## B67 — Deux projecteurs de vision téléchargés ; le BF16 préféré sur des cartes Turing
-- Constat (vérification du bundle des R730) : le motif `*mmproj*F16*` prenait aussi `mmproj-BF16.gguf` (~900 Mo de trop par modèle) et le script utilisait le BF16
+- Constat (vérification du bundle de production) : le motif `*mmproj*F16*` prenait aussi `mmproj-BF16.gguf` (~900 Mo de trop par modèle) et le script utilisait le BF16
   (premier par ordre alphabétique), format que les Quadro RTX 4000 (Turing) ne gèrent pas nativement.
 - Diff : motif `*mmproj-F16*` ; `mmproj()` préfère `mmproj-F16.gguf`. Fichiers BF16 retirés des deux bundles, empreintes mises à jour et vérifiées.
 - Régression introduite puis corrigée dans la foulée : `… | head -1` faisait recevoir un SIGPIPE au second `find` ; sous `pipefail`, `mettre-a-jour doc` s'arrêtait
   en pleine configuration (« no router for requested model »). Remplacé par `sed -n 1p` (lit tout), essayé sous `set -euo pipefail`.
 - Test : A/B sur doc (llama-server temporaire, même image « KTRWB ») : BF16 et F16 lisent tous deux « KTREB » ; service doc en F16 : « KTREB » ; par Open WebUI : image transmise
   (« SOUKU » pour « SGGKU », précision du 4B). `mettre-a-jour doc` n° 16 rc=0. **Prouvé.**
+
+## F19 — doc et dev au choix (demande de l'utilisateur)
+- Menu : « Serveurs d'IA à déployer » : doc et dev, doc seulement, dev seulement (`HIBOU_ROLES`, les bundles plus anciens gardent les deux) ; adresses, VM, disques et cartes
+  demandés pour les seuls serveurs retenus ; modèles téléchargés pour eux seuls ; `hibou installer <rôle non prévu>` refusé avec la marche à suivre.
+- forge suit : supervision, DNS, routes `llm-*`, adresses d'Open WebUI (imposées en base), OpenCode (instances, page « agent de code non déployé »), relecteur
+  (sans dev : notifications « PR à relire » seules), évaluation, comptes, rotation, essai et diagnostic. Sans doc : ni bases de connaissances ni modèles de rédaction
+  (désactivés s'ils existaient), chat sur le modèle de dev ; l'outil de synchronisation de hibou-docs n'échoue plus sans clé du chat.
+- Tests : menu « doc seulement » (bundle jetable) : aucune question sur dev, `HIBOU_ROLES=doc`, seuls les modèles de doc. Hôte d'essai passé en doc seul :
+  OpenCode retiré, Caddy sans `llm-dev`, Prometheus sans dev, Open WebUI sur doc seul, relecteur « notifications seules », `installer dev` refusé ; essai **17 OK**.
+  Passé en dev seul : chat sur le modèle de code, modèles de rédaction désactivés, OpenCode rétabli ; essai **14 OK** (agent de code et relecture réels).
+  Retour à doc et dev : modèles de rédaction recréés ; essai 18 OK, diagnostic sans échec. **Prouvé.**
+
+## B68 — Relecteur jamais réaligné en mise à jour
+- Constat (F19) : `relecteur.env` n'était écrit que par `configurer` ; un changement de serveurs ou de profil de dev ne l'atteignait pas.
+- Diff : `relecteur_llm` en mise à jour de forge : serveur et modèle de dev (ou aucun), relecteur recréé s'il change. Test : « Relecteur : notifications seules », puis « qwen3.5-4b ». **Prouvé.**
+
+## B69 — Modèle d'un ancien profil toujours proposé dans le chat
+- Constat : `qwen3.5-9b` (essai de profil 9B) restait actif alors qu'aucun serveur ne le sert : erreur si on le choisit.
+- Diff : en mise à jour, les modèles de base actifs qui ne sont plus servis sont désactivés. Test : « Modèle qwen3.5-9b retiré du chat : plus servi ». **Prouvé.**
 
 ## Écarts de charte non corrigés (décision ou limite)
 - Open WebUI : « Connectez-vous à Hibou (Open WebUI) » : la mention « (Open WebUI) » est imposée par sa licence ; textes français au vouvoiement (« Comment puis-je vous aider aujourd'hui ? »),

@@ -1,6 +1,11 @@
 # Changelog
 
-## Non publié
+## 0.9.4 — 22/11/2026
+Détail et preuves : `JOURNAL-CORRECTIONS.md` (B67 à B69, F19).
+- **doc et dev au choix** : le menu propose les deux serveurs d’IA, doc seul ou dev seul ; questions, modèles, supervision, chat, OpenCode
+  et relecture suivent (F19). Sans dev, les pull requests restent notifiées ; sans doc, le chat utilise le modèle de dev.
+- Relecteur réaligné à chaque mise à jour (B68) ; modèles qui ne sont plus servis retirés du chat (B69).
+- Release : archive prête à l’emploi (script, miroir, charte, amorces) avec son empreinte.
 - Projecteur de vision : seul le F16 est téléchargé et utilisé (le BF16 n’est pas pris en charge nativement par les cartes Turing), environ 900 Mo de moins par modèle (B67).
 
 ## 0.9.3 — 22/11/2026

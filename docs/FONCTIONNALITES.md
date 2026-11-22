@@ -31,6 +31,7 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Pare-feu | Les ports des serveurs GPU ne s’ouvrent qu’à forge (nftables) | Validé |
 | Réseau isolé | DNS et heure servis par forge, autorité de certification interne, TLS partout | Validé |
 | Supervision des autres nœuds | `hibou installer noeud` | À valider |
+| doc et dev au choix | Menu « Serveurs d’IA » : les deux, doc seul ou dev seul ; forge s’adapte (chat, OpenCode, relecture, supervision) | Validé (les trois cas) |
 | Diagnostic | `hibou diagnostic` : stockages, quorum, cartes, sauvegarde, VM, conteneurs, sites, certificats ; rapport sans secret | Validé |
 | Essai de bout en bout | `hibou essai` : compte temporaire, connexion par Forgejo au chat, à OpenCode et à Grafana, réponses sourcées, fichier joint, export, PR, runner, relecture, notifications ; 17 contrôles en 1 min | Validé |
 | Comptes des personnes | `hibou comptes` : ajouter, changer d’équipes ou de priorité, retirer (connexion bloquée), appliqué à forge, doc et dev, même sur d’autres hôtes | Validé |

@@ -25,6 +25,7 @@ Le menu demande :
 
 | Question | Exemple |
 | --- | --- |
+| Serveurs d’IA | doc et dev, doc seulement ou dev seulement : seules les questions et les modèles utiles suivent |
 | Domaine | `hibou.lan` |
 | Réseau, passerelle | `10.99.0.0/24`, vide |
 | Pont, VLAN | `vmbr1`, vide |

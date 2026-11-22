@@ -10,6 +10,8 @@ import socketio
 
 DOMAINE, COMPTE, CA, ATTENDUS = sys.argv[1:5]
 SANS_DEV = "--sans-dev" in sys.argv
+SANS_DOC = "--sans-doc" in sys.argv
+SANS_RELECTURE = "--sans-relecture" in sys.argv   # pas de serveur dev installé : les PR sont notifiées, pas relues   # installation sans serveur doc : ni bases de connaissances, ni fichiers joints (embeddings)
 AGENT = sys.argv[sys.argv.index("--agent") + 1:sys.argv.index("--agent") + 3] if "--agent" in sys.argv else None
 MDP = sys.stdin.readline().strip()
 FORGE, CHAT, U = f"https://forge.{DOMAINE}", f"https://chat.{DOMAINE}", "http://127.0.0.1:8080"
@@ -140,49 +142,53 @@ def essai_chat(libelle, modele, demande, sources=False, outils=(), delai=600, jo
     return texte, src, fich
 
 
-essai_chat("Chat (modèle de rédaction)", "hibou-documentation", "Réponds seulement par le mot : bonjour.", delai=300)
-essai_chat("Réponse sourcée sur la documentation", "hibou-documentation", "Comment une page arrive-t-elle dans la documentation Hibou ?", sources=True)
-if "hibou-securite" in visibles:
-    essai_chat("Réponse sourcée sur la base sécurité", "hibou-securite", "Que recommande l’ANSSI pour les mots de passe ? Réponds en deux phrases.", sources=True)
-code = uuid.uuid4().hex[:6].upper()
-try:  # document joint au message : son texte doit parvenir au modèle
-    texte, _, _, duree = discuter("hibou-documentation", "Quel est le code de vérification indiqué dans le fichier joint ? Réponds seulement par ce code.",
-                                  delai=300, joints=[joindre("essai-hibou.txt", f"Note d’essai Hibou.\nCode de vérification : {code}\n")])
-    resultat("ok" if code in texte else "echec", "Fichier joint lu par le modèle", f"{duree:.0f} s" if code in texte else "le code du fichier n’est pas dans la réponse")
-except Exception as e:  # noqa: BLE001
-    resultat("echec", "Fichier joint lu par le modèle", f"{e.__class__.__name__}: {str(e)[:120]}")
-# Formats bureautiques joints : leur texte doit être extrait (le PowerPoint demande un modèle spaCy livré dans le bundle).
-def bureautique(code):
-    import io
-    sys.path.insert(0, "/app/hibou-py")
-    import docx, openpyxl, pptx
-    from fpdf import FPDF
-    d = docx.Document(); d.add_paragraph(f"Code : {code}"); b = io.BytesIO(); d.save(b); yield "essai.docx", b.getvalue()
-    w = openpyxl.Workbook(); w.active["A1"] = code; b = io.BytesIO(); w.save(b); yield "essai.xlsx", b.getvalue()
-    p = pptx.Presentation(); sl = p.slides.add_slide(p.slide_layouts[1]); sl.shapes.title.text = "Essai"; sl.placeholders[1].text = f"Code : {code}"
-    b = io.BytesIO(); p.save(b); yield "essai.pptx", b.getvalue()
-    f = FPDF(); f.add_page(); f.set_font("helvetica", size=12); f.cell(0, 10, f"Code : {code}"); yield "essai.pdf", bytes(f.output())
+if SANS_DOC:
+    modele_base = sorted(m for m in visibles if not m.startswith("hibou-"))
+    essai_chat("Chat (modèle de code, pas de serveur doc)", modele_base[0] if modele_base else "aucun", "Réponds seulement par le mot : bonjour.", delai=300)
+else:
+    essai_chat("Chat (modèle de rédaction)", "hibou-documentation", "Réponds seulement par le mot : bonjour.", delai=300)
+    essai_chat("Réponse sourcée sur la documentation", "hibou-documentation", "Comment une page arrive-t-elle dans la documentation Hibou ?", sources=True)
+    if "hibou-securite" in visibles:
+        essai_chat("Réponse sourcée sur la base sécurité", "hibou-securite", "Que recommande l’ANSSI pour les mots de passe ? Réponds en deux phrases.", sources=True)
+    code = uuid.uuid4().hex[:6].upper()
+    try:  # document joint au message : son texte doit parvenir au modèle
+        texte, _, _, duree = discuter("hibou-documentation", "Quel est le code de vérification indiqué dans le fichier joint ? Réponds seulement par ce code.",
+                                      delai=300, joints=[joindre("essai-hibou.txt", f"Note d’essai Hibou.\nCode de vérification : {code}\n")])
+        resultat("ok" if code in texte else "echec", "Fichier joint lu par le modèle", f"{duree:.0f} s" if code in texte else "le code du fichier n’est pas dans la réponse")
+    except Exception as e:  # noqa: BLE001
+        resultat("echec", "Fichier joint lu par le modèle", f"{e.__class__.__name__}: {str(e)[:120]}")
+    # Formats bureautiques joints : leur texte doit être extrait (le PowerPoint demande un modèle spaCy livré dans le bundle).
+    def bureautique(code):
+        import io
+        sys.path.insert(0, "/app/hibou-py")
+        import docx, openpyxl, pptx
+        from fpdf import FPDF
+        d = docx.Document(); d.add_paragraph(f"Code : {code}"); b = io.BytesIO(); d.save(b); yield "essai.docx", b.getvalue()
+        w = openpyxl.Workbook(); w.active["A1"] = code; b = io.BytesIO(); w.save(b); yield "essai.xlsx", b.getvalue()
+        p = pptx.Presentation(); sl = p.slides.add_slide(p.slide_layouts[1]); sl.shapes.title.text = "Essai"; sl.placeholders[1].text = f"Code : {code}"
+        b = io.BytesIO(); p.save(b); yield "essai.pptx", b.getvalue()
+        f = FPDF(); f.add_page(); f.set_font("helvetica", size=12); f.cell(0, 10, f"Code : {code}"); yield "essai.pdf", bytes(f.output())
 
 
-try:
-    lus, rates = [], []
-    for nom_f, contenu in bureautique(code):
-        ((lus if code in ((joindre(nom_f, contenu)["file"].get("data") or {}).get("content") or "") else rates)).append(nom_f.rsplit(".", 1)[1])
-    resultat("echec" if rates else "ok", "Documents joints Word, Excel, PowerPoint, PDF", ("illisibles : " + ", ".join(rates)) if rates else "texte extrait des 4 formats")
-except Exception as e:  # noqa: BLE001
-    resultat("echec", "Documents joints Word, Excel, PowerPoint, PDF", f"{e.__class__.__name__}: {str(e)[:120]}")
-r = essai_chat("Export d’un document (PDF)", "hibou-documentation",
-               "Exporte en PDF un document intitulé « Essai Hibou » contenant la phrase : Essai automatique réussi.", outils=["exporter_document"])
-if r is not None:
-    fich = r[2]
-    if fich:
-        fid = fich[0].get("id") or (fich[0].get("file") or {}).get("id")
-        req = urllib.request.Request(f"{U}/api/v1/files/{fid}/content", headers={"Authorization": f"Bearer {TOK}"})
-        with urllib.request.urlopen(req, timeout=60) as x:
-            debut = x.read()[:5]
-        resultat("ok" if debut == b"%PDF-" else "echec", "Téléchargement du document exporté", "PDF valide" if debut == b"%PDF-" else f"début {debut!r}")
-    else:
-        resultat("attention", "Téléchargement du document exporté", "le modèle n’a pas appelé l’outil d’export")
+    try:
+        lus, rates = [], []
+        for nom_f, contenu in bureautique(code):
+            ((lus if code in ((joindre(nom_f, contenu)["file"].get("data") or {}).get("content") or "") else rates)).append(nom_f.rsplit(".", 1)[1])
+        resultat("echec" if rates else "ok", "Documents joints Word, Excel, PowerPoint, PDF", ("illisibles : " + ", ".join(rates)) if rates else "texte extrait des 4 formats")
+    except Exception as e:  # noqa: BLE001
+        resultat("echec", "Documents joints Word, Excel, PowerPoint, PDF", f"{e.__class__.__name__}: {str(e)[:120]}")
+    r = essai_chat("Export d’un document (PDF)", "hibou-documentation",
+                   "Exporte en PDF un document intitulé « Essai Hibou » contenant la phrase : Essai automatique réussi.", outils=["exporter_document"])
+    if r is not None:
+        fich = r[2]
+        if fich:
+            fid = fich[0].get("id") or (fich[0].get("file") or {}).get("id")
+            req = urllib.request.Request(f"{U}/api/v1/files/{fid}/content", headers={"Authorization": f"Bearer {TOK}"})
+            with urllib.request.urlopen(req, timeout=60) as x:
+                debut = x.read()[:5]
+            resultat("ok" if debut == b"%PDF-" else "echec", "Téléchargement du document exporté", "PDF valide" if debut == b"%PDF-" else f"début {debut!r}")
+        else:
+            resultat("attention", "Téléchargement du document exporté", "le modèle n’a pas appelé l’outil d’export")
 sio.disconnect()
 
 
@@ -193,7 +199,10 @@ if "/login/oauth/grant" in html:
     champs = dict(re.findall(r'name="(_csrf|client_id|state|scope|nonce|redirect_uri|granted)" value="([^"]*)"', html))
     champs["granted"] = "true"
     url, html = page(f"{FORGE}/login/oauth/grant", champs)
-if urllib.parse.urlsplit(url).netloc == f"code.{DOMAINE}" and "Pas d’espace OpenCode" in html:
+if urllib.parse.urlsplit(url).netloc == f"code.{DOMAINE}" and "n’est pas déployé" in html:
+    # Installation sans serveur dev : la connexion passe, la page le dit.
+    resultat("ok", "Connexion à code. par Forgejo", f"{time.time() - t:.1f} s, agent de code non déployé (annoncé)")
+elif urllib.parse.urlsplit(url).netloc == f"code.{DOMAINE}" and "Pas d’espace OpenCode" in html:
     # Le compte d’essai passe la connexion et le contrôle d’équipe, mais n’a pas d’instance : réponse attendue.
     resultat("ok", "Connexion à OpenCode par Forgejo", f"{time.time() - t:.1f} s, droits vérifiés")
 elif urllib.parse.urlsplit(url).netloc == f"code.{DOMAINE}" and "oauth2" not in urllib.parse.urlsplit(url).path and "<html" in html.lower():
@@ -267,10 +276,12 @@ try:
     resultat({"success": "ok", "pending": "echec", "": "echec"}.get(etat, "echec"), "Runner de documentation",
              f"{etat or 'aucun statut'} en {time.time() - t0:.0f} s")
     t0, avis = time.time(), []
-    while time.time() - t0 < (900 if not SANS_DEV else 120) and not avis:
+    while not SANS_RELECTURE and time.time() - t0 < (900 if not SANS_DEV else 120) and not avis:
         time.sleep(15)
         avis = [a for a in forgejo("GET", f"/repos/hibou/hibou-docs/pulls/{pr['number']}/reviews") if a["user"]["login"] == "hibou-relecteur"]
-    if not avis:
+    if SANS_RELECTURE:
+        print("I\tpas de serveur dev : relecture automatique non installée", flush=True)
+    elif not avis:
         resultat("echec", "Relecture automatique", "aucun avis de hibou-relecteur")
     elif "impossible" in (avis[0].get("body") or ""):
         resultat("attention" if SANS_DEV else "echec", "Relecture automatique", "relecteur sans serveur dev : avis d’impossibilité posté")

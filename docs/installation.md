@@ -14,6 +14,24 @@ son hôte Proxmox. Les commandes d’installation se lancent en root sur l’hô
 - **Machine connectée** : Ubuntu avec Docker, python3-venv, git, zstd, openssl, rsync, et un **disque séparé** pour le
   bundle (20 à 300 Go selon les profils). Le script refuse d’écrire le bundle sur le disque système.
 
+## Installation en ligne (sans disque de transport)
+
+Si l’hôte Proxmox qui portera forge a accès à Internet, une seule commande fait tout, sur place :
+
+```bash
+sudo ./hibou en-ligne /var/lib/hibou/bundle
+```
+
+1. Elle crée une **VM de préparation** (Ubuntu et Docker) sur un pont qui mène à Internet : numéro, pont, adresse et
+   passerelle sont demandés une fois (compter 60 Go de disque pour 4 Go de cartes, 300 Go pour 48 Go et plus : le cache de Docker double la place du bundle).
+2. Elle y lance le **même menu** que `telecharger` et prépare le bundle (versions figées, empreintes).
+3. Elle le **rapatrie** sur l’hôte, le vérifie, arrête la VM de préparation (gardée pour les mises à jour).
+4. Elle **installe** forge sur cet hôte, puis doc et dev : sur cet hôte, ou sur l’hôte de leurs cartes par SSH
+   (root, comme entre les nœuds d’un cluster Proxmox). Une VM déjà installée est mise à jour.
+
+Les VM Hibou restent sans Internet. Pour mettre à jour : relancer `hibou en-ligne`, qui ne retélécharge que ce qui a
+changé. Sans Internet sur l’hôte : bundle sur disque, ci-dessous.
+
 ## 1. Préparer le bundle
 
 ```bash

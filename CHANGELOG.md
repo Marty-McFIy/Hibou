@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.5 — 22/11/2026
+Détail et preuves : `JOURNAL-CORRECTIONS.md` (F20).
+- **`hibou en-ligne`** : sur un hôte Proxmox connecté à Internet, une VM de préparation est créée d’office, le bundle y est préparé avec le même menu,
+  rapatrié, vérifié, puis forge, doc et dev sont installés ou mis à jour (ici ou sur l’hôte de leurs cartes) : plus de disque de transport.
+  Les VM Hibou restent sans Internet ; relancer la commande met à jour.
+
 ## 0.9.4 — 22/11/2026
 Détail et preuves : `JOURNAL-CORRECTIONS.md` (B67 à B69, F19).
 - **doc et dev au choix** : le menu propose les deux serveurs d’IA, doc seul ou dev seul ; questions, modèles, supervision, chat, OpenCode

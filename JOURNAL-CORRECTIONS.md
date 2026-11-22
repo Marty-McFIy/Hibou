@@ -752,6 +752,17 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
 - Constat : `qwen3.5-9b` (essai de profil 9B) restait actif alors qu'aucun serveur ne le sert : erreur si on le choisit.
 - Diff : en mise à jour, les modèles de base actifs qui ne sont plus servis sont désactivés. Test : « Modèle qwen3.5-9b retiré du chat : plus servi ». **Prouvé.**
 
+## F20 — Installation en ligne, sans disque de transport (demande de l'utilisateur)
+- `hibou en-ligne [dossier]` sur l'hôte Proxmox connecté qui portera forge : VM de préparation créée d'office (image Ubuntu vérifiée, clé SSH dédiée, Docker et outils),
+  même menu que `telecharger` (choix et secrets d'une préparation précédente repris), bundle rapatrié et vérifié, VM de préparation arrêtée et gardée pour les mises à jour,
+  puis forge installée ou mise à jour ici, doc et dev ici ou sur l'hôte de leurs cartes (bundle copié par SSH root, comme entre nœuds d'un cluster) ; une VM arrêtée est signalée.
+  Les VM Hibou restent sans Internet. Appels SSH de service en `ssh -n` (sinon ils avalent les réponses suivantes).
+- Test (hôte d'essai) : premier passage : VM 299 créée et outillée, bundle de 19 Go préparé, rapatrié, vérifié ; forge et doc mises à jour, dev arrêtée signalée ; rc=0 ;
+  essai **18 OK**. Place mesurée dans la VM de préparation : 45 Go pour un bundle de 19 Go (cache de Docker) : conseil porté à 60 / 300 Go.
+- Second passage (mise à jour) : arrêté net (rc=1) : le rapatriement `rsync --delete` avait effacé le fichier de réglages de la VM de préparation, rangé dans le bundle.
+  Diff : fichier exclu de la synchronisation, adresse relue dans la configuration Proxmox de la VM s'il manque (et réécrite). Rejoué : images « inchangée »,
+  « 0 image(s) chargée(s) » sur forge et doc, « rien à redémarrer », rc=0 en 38 min. **Prouvé.**
+
 ## Écarts de charte non corrigés (décision ou limite)
 - Open WebUI : « Connectez-vous à Hibou (Open WebUI) » : la mention « (Open WebUI) » est imposée par sa licence ; textes français au vouvoiement (« Comment puis-je vous aider aujourd'hui ? »),
   compilés dans des fichiers JavaScript au nom changeant à chaque version : non modifiés (bricolage fragile).

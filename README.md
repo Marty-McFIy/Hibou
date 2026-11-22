@@ -6,7 +6,7 @@
   <h1>HIBOU</h1>
   <p><strong>Deux IA locales, documentation et développement, installées d’un seul script dans un réseau sans Internet.</strong></p>
   <p>
-    <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.9.4-F2B544" alt="Version 0.9.4"></a>
+    <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.9.5-F2B544" alt="Version 0.9.5"></a>
     <a href="https://github.com/Marty-McFIy/Hibou/actions/workflows/controles.yml"><img src="https://github.com/Marty-McFIy/Hibou/actions/workflows/controles.yml/badge.svg" alt="Contrôles"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-2F3B52" alt="Licence MIT"></a>
     <img src="https://img.shields.io/badge/Proxmox%20VE-9-0F1420" alt="Proxmox VE 9">
@@ -47,6 +47,7 @@
 
 | Version | Date | Contenu | Notes |
 | --- | --- | --- | --- |
+| `v0.9.5` | 22/11/2026 | Installation en ligne sans disque de transport (`hibou en-ligne`) | [notes](docs/notes-de-version/v0.9.5.md) · [preuves](JOURNAL-CORRECTIONS.md) |
 | `v0.9.4` | 22/11/2026 | doc et dev au choix (l’un, l’autre ou les deux), archive de release prête à l’emploi | [notes](docs/notes-de-version/v0.9.4.md) · [preuves](JOURNAL-CORRECTIONS.md) |
 | `v0.9.3` | 22/11/2026 | Gestion des comptes, VM sur plusieurs hôtes, pièces jointes (PowerPoint, images), miroir élargi, OpenCode sans fournisseur externe | [notes](docs/notes-de-version/v0.9.3.md) · [preuves](JOURNAL-CORRECTIONS.md) |
 | `v0.9.2` | 22/11/2026 | Essai de bout en bout et diagnostic en une commande, rotation des secrets, carte de recherche (embeddings, reranker), relecteur appuyé sur l’ANSSI, import de documents, base sécurité, notifications d’équipe | [notes](docs/notes-de-version/v0.9.2.md) · [preuves](JOURNAL-CORRECTIONS.md) |
@@ -87,7 +88,14 @@ sha256sum -c hibou-<version>.tar.gz.sha256
 tar xzf hibou-<version>.tar.gz && cd hibou-<version>
 ```
 
-Sur la machine connectée (Ubuntu avec Docker), bundle sur un disque à part :
+**Hôte Proxmox connecté à Internet** : une seule commande prépare le bundle dans une VM temporaire et installe tout, sans
+disque de transport (les VM Hibou restent sans Internet) :
+
+```shell
+sudo ./hibou en-ligne /var/lib/hibou/bundle
+```
+
+**Réseau isolé** : sur la machine connectée (Ubuntu avec Docker), bundle sur un disque à part :
 
 ```shell
 ./hibou autotest                          # cohérence des réglages
@@ -126,7 +134,7 @@ Pas à pas, réponses du menu et dépannage : [docs/installation.md](docs/instal
 | --- | --- |
 | **Découvrir** | [Fonctionnalités](docs/FONCTIONNALITES.md) · [Architecture](docs/architecture.md) · [Captures](docs/captures/0.9.0) |
 | **Installer** | [Installation pas à pas](docs/installation.md) · [Mise en production et cluster](docs/mise-en-production.md) · [Aide-mémoire du bundle](docs/LISEZMOI-0.9.0.md) |
-| **Versions** | [Notes 0.9.4](docs/notes-de-version/v0.9.4.md) · [Notes 0.9.3](docs/notes-de-version/v0.9.3.md) · [Notes 0.9.2](docs/notes-de-version/v0.9.2.md) · [Notes 0.9.0](docs/notes-de-version/v0.9.0.md) · [Changelog](CHANGELOG.md) · [Journal des corrections](JOURNAL-CORRECTIONS.md) |
+| **Versions** | [Notes 0.9.5](docs/notes-de-version/v0.9.5.md) · [Notes 0.9.4](docs/notes-de-version/v0.9.4.md) · [Notes 0.9.3](docs/notes-de-version/v0.9.3.md) · [Notes 0.9.2](docs/notes-de-version/v0.9.2.md) · [Notes 0.9.0](docs/notes-de-version/v0.9.0.md) · [Changelog](CHANGELOG.md) · [Journal des corrections](JOURNAL-CORRECTIONS.md) |
 | **Charte** | [Charte graphique](charte/LISEZMOI.md) |
 | **Contribuer** | [Contribuer](CONTRIBUTING.md) · [Sécurité](SECURITY.md) |
 

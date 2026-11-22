@@ -3,13 +3,14 @@ chaîne de documentation (pull request, runner, relecture). Lancé par « hibou 
 avec un compte d’essai temporaire. Mot de passe sur l’entrée standard, jamais affiché.
 
 Sortie : une ligne par contrôle, « R<TAB>ok|attention|echec<TAB>libellé<TAB>détail », lue par le script hibou.
-Usage : hibou_essai.py <domaine> <compte> <ca.crt> <modèles attendus, séparés par des virgules> [--sans-dev]"""
+Usage : hibou_essai.py <domaine> <compte> <ca.crt> <modèles attendus, séparés par des virgules> [--sans-dev] [--agent <url> <dépôt>]"""
 import base64, datetime, http.cookiejar, json, re, ssl, sys, time, urllib.error, urllib.parse, urllib.request, uuid
 
 import socketio
 
 DOMAINE, COMPTE, CA, ATTENDUS = sys.argv[1:5]
 SANS_DEV = "--sans-dev" in sys.argv
+AGENT = sys.argv[sys.argv.index("--agent") + 1:sys.argv.index("--agent") + 3] if "--agent" in sys.argv else None
 MDP = sys.stdin.readline().strip()
 FORGE, CHAT, U = f"https://forge.{DOMAINE}", f"https://chat.{DOMAINE}", "http://127.0.0.1:8080"
 ctx = ssl.create_default_context(cafile=CA)
@@ -85,15 +86,15 @@ time.sleep(1)
 def joindre(nom, contenu):
     """Envoie un fichier comme la page (multipart), attend l’extraction de son texte → élément à joindre au message."""
     limite = uuid.uuid4().hex
-    corps = (f"--{limite}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{nom}\"\r\nContent-Type: text/plain\r\n\r\n").encode() \
-        + contenu.encode() + f"\r\n--{limite}--\r\n".encode()
+    corps = (f"--{limite}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{nom}\"\r\nContent-Type: application/octet-stream\r\n\r\n").encode() \
+        + (contenu if isinstance(contenu, bytes) else contenu.encode()) + f"\r\n--{limite}--\r\n".encode()
     r = urllib.request.Request(U + "/api/v1/files/?process_in_background=false", data=corps, method="POST",
                                headers={"Authorization": f"Bearer {TOK}", "Content-Type": f"multipart/form-data; boundary={limite}"})
     with urllib.request.urlopen(r, timeout=600) as x:
         f = json.loads(x.read())
     for _ in range(30):
         f = api("GET", f"/api/v1/files/{f['id']}")
-        if (f.get("data") or {}).get("content"):
+        if (f.get("data") or {}).get("content") or (f.get("data") or {}).get("status") == "failed":
             break
         time.sleep(2)
     return {"type": "file", "file": f, "id": f["id"], "name": nom, "status": "uploaded"}
@@ -150,6 +151,26 @@ try:  # document joint au message : son texte doit parvenir au modèle
     resultat("ok" if code in texte else "echec", "Fichier joint lu par le modèle", f"{duree:.0f} s" if code in texte else "le code du fichier n’est pas dans la réponse")
 except Exception as e:  # noqa: BLE001
     resultat("echec", "Fichier joint lu par le modèle", f"{e.__class__.__name__}: {str(e)[:120]}")
+# Formats bureautiques joints : leur texte doit être extrait (le PowerPoint demande un modèle spaCy livré dans le bundle).
+def bureautique(code):
+    import io
+    sys.path.insert(0, "/app/hibou-py")
+    import docx, openpyxl, pptx
+    from fpdf import FPDF
+    d = docx.Document(); d.add_paragraph(f"Code : {code}"); b = io.BytesIO(); d.save(b); yield "essai.docx", b.getvalue()
+    w = openpyxl.Workbook(); w.active["A1"] = code; b = io.BytesIO(); w.save(b); yield "essai.xlsx", b.getvalue()
+    p = pptx.Presentation(); sl = p.slides.add_slide(p.slide_layouts[1]); sl.shapes.title.text = "Essai"; sl.placeholders[1].text = f"Code : {code}"
+    b = io.BytesIO(); p.save(b); yield "essai.pptx", b.getvalue()
+    f = FPDF(); f.add_page(); f.set_font("helvetica", size=12); f.cell(0, 10, f"Code : {code}"); yield "essai.pdf", bytes(f.output())
+
+
+try:
+    lus, rates = [], []
+    for nom_f, contenu in bureautique(code):
+        ((lus if code in ((joindre(nom_f, contenu)["file"].get("data") or {}).get("content") or "") else rates)).append(nom_f.rsplit(".", 1)[1])
+    resultat("echec" if rates else "ok", "Documents joints Word, Excel, PowerPoint, PDF", ("illisibles : " + ", ".join(rates)) if rates else "texte extrait des 4 formats")
+except Exception as e:  # noqa: BLE001
+    resultat("echec", "Documents joints Word, Excel, PowerPoint, PDF", f"{e.__class__.__name__}: {str(e)[:120]}")
 r = essai_chat("Export d’un document (PDF)", "hibou-documentation",
                "Exporte en PDF un document intitulé « Essai Hibou » contenant la phrase : Essai automatique réussi.", outils=["exporter_document"])
 if r is not None:
@@ -279,3 +300,49 @@ finally:
         forgejo("DELETE", f"/repos/hibou/hibou-docs/branches/{urllib.parse.quote(branche, safe='')}")
     except urllib.error.HTTPError:
         pass
+
+
+# ─── Agent de code : un ticket traité de bout en bout ──────────────────────
+def agent(url, depot):
+    def oc(m, p, corps=None):
+        r = urllib.request.Request(url + p, method=m, data=json.dumps(corps).encode() if corps is not None else None,
+                                   headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(r, timeout=60) as f:
+            d = f.read()
+            return json.loads(d) if d else None
+    t0 = time.time()
+    for _ in range(30):  # l’instance temporaire démarre
+        try:
+            oc("GET", "/session"); break
+        except Exception:
+            time.sleep(2)
+    else:
+        resultat("echec", "Agent de code", "l’instance OpenCode d’essai ne répond pas"); return
+    sid = oc("POST", "/session", {"title": "Essai Hibou"})["id"]
+    oc("POST", f"/session/{sid}/prompt_async", {"parts": [{"type": "text", "text":
+        f"Dans le dépôt hibou/{depot} : regarde les tickets ouverts, traite le ticket n° 1, puis ouvre une pull request."}]})
+    time.sleep(3)
+    while time.time() - t0 < 1200:
+        for demande in oc("GET", "/permission") or []:   # ce que la personne accepterait : une fois, rien de refusé d’office
+            oc("POST", f"/permission/{demande['id']}/reply", {"reply": "once"})
+        if (oc("GET", "/session/status") or {}).get(sid, {}).get("type", "idle") == "idle":
+            break
+        time.sleep(3)
+    prs = forgejo("GET", f"/repos/hibou/{depot}/pulls?state=all")
+    if not prs:
+        resultat("attention", "Agent de code", f"pas de pull request après {time.time() - t0:.0f} s (le modèle n’a pas abouti)"); return
+    pr = prs[0]
+    fichiers = forgejo("GET", f"/repos/hibou/{depot}/pulls/{pr['number']}/files")
+    lie = "#1" in (pr.get("body") or "")
+    if not fichiers:
+        resultat("attention", "Agent de code", "pull request vide")
+    else:
+        resultat("ok" if lie else "attention", "Agent de code (ticket → pull request)",
+                 f"{time.time() - t0:.0f} s, {len(fichiers)} fichier(s)" + (", ticket lié" if lie else ", ticket non lié"))
+
+
+if AGENT and not SANS_DEV:
+    try:
+        agent(*AGENT)
+    except Exception as e:  # noqa: BLE001
+        resultat("echec", "Agent de code", f"{e.__class__.__name__}: {str(e)[:120]}")

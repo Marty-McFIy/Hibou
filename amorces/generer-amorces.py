@@ -275,7 +275,7 @@ ecrire("open-webui/publier_forgejo.py", '''
 """
 title: Publier dans Forgejo
 author: Hibou
-version: 0.4.1
+version: 0.4.2
 description: Publie un document Markdown dans hibou-docs, lit un document publié ou en propose une nouvelle version, toujours par pull request.
 """
 import base64, datetime, re
@@ -284,6 +284,21 @@ from pydantic import BaseModel, Field
 
 
 URL_NUE = re.compile(r"(?<![<(`\\[])\\bhttps?://[^\\s<>()`]+[^\\s<>()`.,;:!?]")
+
+
+# Dossier de publication de chaque gabarit (champ « modele » de l’en-tête) : le site et le runner les attendent là.
+DOSSIERS = {"procedure": "procedures", "fiche-technique": "fiches-techniques", "guide-utilisateur": "guides",
+             "architecture": "architecture", "decision": "decisions"}
+
+
+def ranger(chemin: str, contenu: str) -> str:
+    """Chemin corrigé d’après le gabarit du document : un petit modèle oublie souvent le dossier (docs/x.md)."""
+    m = re.match(r"^---\\n(.*?)\\n---", contenu, re.S)
+    gabarit = re.search(r"^modele:\\s*([a-z-]+)\\s*$", m.group(1), re.M) if m else None
+    dossier = DOSSIERS.get(gabarit.group(1)) if gabarit else None
+    if not dossier or chemin.startswith(f"docs/{dossier}/"):
+        return chemin
+    return f"docs/{dossier}/{chemin.rsplit('/', 1)[-1]}"
 
 
 def normaliser(md: str) -> str:
@@ -352,6 +367,7 @@ class Tools:
         contenu = normaliser(contenu)
         if not contenu.startswith("---"):
             return "Le document doit commencer par son en-tête YAML (modele, titre)."
+        chemin = ranger(chemin, contenu)
         if "<!--" in contenu:  # gabarit renvoyé tel quel : le runner le refuserait, autant le dire avant d’ouvrir la PR
             return "Le document contient encore des consignes du template (<!-- … -->). Remplace chacune par le contenu, puis publie à nouveau."
         auteur = (__user__ or {}).get("name") or "inconnu"
@@ -372,7 +388,7 @@ class Tools:
             if e.response is not None and e.response.status_code == 422:
                 return "Ce fichier existe déjà : lis-le avec lire_document, puis propose une nouvelle version avec mettre_a_jour_document."
             return f"Forgejo a refusé la publication ({e}). Vérifie le jeton et le dépôt dans les réglages de l’outil."
-        return f"J’ai ouvert la pull request : {pr.get('html_url')}"
+        return f"J’ai ouvert la pull request : {pr.get('html_url')} (document : {chemin})"
 
     def _branche(self, chemin, courriel, auteur, prefixe=""):
         personne = re.sub(r"[^a-z0-9-]", "-", (courriel.split("@")[0] or auteur).lower()).strip("-") or "inconnu"

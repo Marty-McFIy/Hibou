@@ -123,7 +123,8 @@ def prepare(a):
         work = out / "_npm_work"; shutil.rmtree(work, ignore_errors=True); work.mkdir(parents=True)
         (work / "package.json").write_text('{"name":"hibou mirror","version":"0.0.0","private":true}')
         npm = ["npm"] if shutil.which("npm") else [*docker_cmd(), "run", "--rm", "-v", f"{work.resolve()}:/w", "-w", "/w", "node:22-bookworm-slim", "npm"]
-        run([*npm, "install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund", *npms], dry, cwd=work)
+        # --legacy-peer-deps : une liste de paquets sans lien entre eux ne doit pas échouer sur un conflit de dépendances « peer ».
+        run([*npm, "install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund", "--legacy-peer-deps", *npms], dry, cwd=work)
         entries = []
         if not dry:
             lock = json.loads((work / "package-lock.json").read_text())
@@ -186,6 +187,8 @@ def push(a):
     host_port = re.sub(r"^https?://", "", base)
     registry = a.registry or host_port
 
+    echecs = 0   # comptés : le script hibou ne marque le miroir « importé » que sans échec, pour réessayer sinon
+
     # --- PyPI (twine dans un venv alimenté hors ligne depuis tools/)
     pyfiles = sorted(p for p in (d / "pypi").glob("*") if p.is_file()) if (d / "pypi").is_dir() else []
     if pyfiles and "pypi" in only:
@@ -200,8 +203,18 @@ def push(a):
                 ok += 1
             elif re.search(r"409|Conflict|already exists", text, re.I):
                 skipped += 1
+            elif "InvalidDistribution" in text and not dry:
+                # Métadonnées anciennes (Metadata-Version 2.0, ex. pyserial) refusées par twine, acceptées par Forgejo :
+                # envoi direct par l’API de dépôt PyPI.
+                code = envoi_pypi(f"{base}/api/packages/{a.owner}/pypi", a.user, a.password, f)
+                if code in (200, 201):
+                    ok += 1
+                elif code == 409:
+                    skipped += 1
+                else:
+                    echecs += 1; log(redact(f"pypi ÉCHEC {f.name}: envoi direct, HTTP {code}"))
             else:
-                log(redact(f"pypi ÉCHEC {f.name}: {text.strip()[-300:]}"))
+                echecs += 1; log(redact(f"pypi ÉCHEC {f.name}: {text.strip()[-300:]}"))
         log(f"pypi : {ok} publiés, {skipped} déjà présents")
 
     # --- npm (npm publish de chaque tarball, versions croissantes => dist-tag latest = la plus récente)
@@ -216,7 +229,8 @@ def push(a):
         ok = skipped = 0
         for e in entries:
             tag = "prerelease" if is_prerelease(e["version"]) else "latest"
-            r = run(["npm", "publish", d / e["file"], "--userconfig", npmrc, "--registry", reg, "--tag", tag],
+            # --provenance=false : certains paquets la demandent (publishConfig), impossible hors d’une CI publique.
+            r = run(["npm", "publish", d / e["file"], "--userconfig", npmrc, "--registry", reg, "--tag", tag, "--provenance=false"],
                     dry, check=False, capture=True)
             text = (r.stdout or "") + (r.stderr or "")
             if r.returncode == 0:
@@ -224,7 +238,7 @@ def push(a):
             elif re.search(r"409|Conflict|previously published|already exists", text, re.I):
                 skipped += 1
             else:
-                log(redact(f"npm ÉCHEC {e['name']}@{e['version']}: {text.strip()[-300:]}"))
+                echecs += 1; log(redact(f"npm ÉCHEC {e['name']}@{e['version']}: {text.strip()[-300:]}"))
         npmrc.unlink(missing_ok=True)
         log(f"npm : {ok} publiés, {skipped} déjà présents")
 
@@ -242,7 +256,7 @@ def push(a):
                     urllib.request.urlopen(req, timeout=60)
                 except urllib.error.HTTPError as x:
                     if x.code != 409:
-                        log(f"git ÉCHEC création de {a.owner}/{e['name']} : HTTP {x.code}")
+                        echecs += 1; log(f"git ÉCHEC création de {a.owner}/{e['name']} : HTTP {x.code}")
             # Conteneur root, dépôt monté appartenant à l’utilisateur du bundle : git exige safe.directory.
             run(["git", "-c", f"safe.directory={(d / e['dir']).resolve()}", "-C", d / e["dir"], "-c", "credential.helper=", "push", "--prune", remote,
                  "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"], dry)
@@ -262,7 +276,29 @@ def push(a):
             run([*dk, "tag", e["image"], ref], dry)
             run([*dk, "push", ref], dry)
             log(f"image publiée : {ref}")
+    if echecs:
+        log(f"import terminé avec {echecs} échec(s)"); sys.exit(2)
     log("import terminé")
+
+def envoi_pypi(url, user, password, f):
+    """Dépôt d’un fichier par l’API PyPI de Forgejo (multipart), sans twine → code HTTP."""
+    nom = f.name
+    m = re.match(r"^(.+?)-(\d[^-]*)(-.+)?\.whl$", nom) or re.match(r"^(.+?)-(\d[^-]*)\.(tar\.gz|zip)$", nom)
+    if not m:
+        return 0
+    data = f.read_bytes(); limite = "hibou" + hashlib.sha256(data).hexdigest()[:16]
+    champs = {":action": "file_upload", "protocol_version": "1", "name": m.group(1), "version": m.group(2),
+              "sha256_digest": hashlib.sha256(data).hexdigest(), "filetype": "bdist_wheel" if nom.endswith(".whl") else "sdist"}
+    corps = b"".join(f"--{limite}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode() for k, v in champs.items())
+    corps += f"--{limite}\r\nContent-Disposition: form-data; name=\"content\"; filename=\"{nom}\"\r\nContent-Type: application/octet-stream\r\n\r\n".encode()
+    corps += data + f"\r\n--{limite}--\r\n".encode()
+    req = urllib.request.Request(url, data=corps, method="POST", headers={
+        "Content-Type": f"multipart/form-data; boundary={limite}",
+        "Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()})
+    try:
+        return urllib.request.urlopen(req, timeout=120).status
+    except urllib.error.HTTPError as x:
+        return x.code
 
 # --------------------------------------------------------------------------- CLI
 def main():

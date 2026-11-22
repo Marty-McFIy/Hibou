@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.3 — 22/11/2026
+Détail et preuves : `JOURNAL-CORRECTIONS.md` (B60 à B66, F14 à F18).
+- **`hibou comptes`** : ajouter une personne, changer ses équipes ou sa priorité, la retirer (connexion bloquée), appliqué à forge, doc et dev (F14).
+- Commandes multi-hôtes : forge, doc et dev peuvent être sur des hôtes différents ; une VM d’un autre hôte est mise à jour par SSH (B62).
+- Pièces jointes : PowerPoint lu hors ligne (B63), images transmises à tous les modèles de doc qui ont la vision (B64) ; OpenCode limité au fournisseur Hibou
+  (« OpenCode Zen » retiré), images jointes selon le modèle (F17).
+- Miroir : sélection de départ (55 paquets Python, 31 npm, 11 images, 2 dépôts git), republié seulement s’il change, échecs signalés et réessayés (F16, B65).
+- `hibou essai` : agent de code (ticket → PR) et documents bureautiques joints (F18) ; `forgejo-pr` lie les tickets (F15) ; l’import range le document dans son dossier (B60) ;
+  les nouvelles questions du menu sont posées aux bundles existants (B61).
+- Serveurs de modèles : un conteneur qui a perdu l’accès aux cartes (après un `daemon-reload`) est relancé ; `hibou diagnostic` le détecte (B66).
+
 ## 0.9.2 — 22/11/2026
 Détail et preuves : `JOURNAL-CORRECTIONS.md` (B46 à B59, F1 à F13).
 - **`hibou essai`** : essai de bout en bout avec un compte temporaire (17 contrôles en 1 min) ; **`hibou diagnostic`** : contrôle d’un hôte, rapport sans secret (F12, F4).

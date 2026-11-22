@@ -33,6 +33,7 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Supervision des autres nœuds | `hibou installer noeud` | À valider |
 | Diagnostic | `hibou diagnostic` : stockages, quorum, cartes, sauvegarde, VM, conteneurs, sites, certificats ; rapport sans secret | Validé |
 | Essai de bout en bout | `hibou essai` : compte temporaire, connexion par Forgejo au chat, à OpenCode et à Grafana, réponses sourcées, fichier joint, export, PR, runner, relecture, notifications ; 17 contrôles en 1 min | Validé |
+| Comptes des personnes | `hibou comptes` : ajouter, changer d’équipes ou de priorité, retirer (connexion bloquée), appliqué à forge, doc et dev, même sur d’autres hôtes | Validé |
 | Rotation des secrets | `hibou renouveler-secrets` : nouvelles clés d’API, jetons des comptes de service (anciens révoqués), applications de connexion, secret du webhook | Validé |
 
 ## 3. Serveurs de modèles (doc et dev)
@@ -63,7 +64,7 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Compression du contexte | Une conversation trop longue est résumée automatiquement au lieu d’échouer ; les derniers messages restent intacts. Bouton « Compression du contexte » dans le menu « + » (actif par défaut) et réglage personnel « Ne jamais compresser » | Validé |
 | Base « Hibou · Sécurité » (option) | Guides et recommandations de l’ANSSI récupérés à la préparation du bundle, plus tes textes de référence (IGI 1300, II 901…) ; modèle « Hibou · Sécurité » qui cite le guide utilisé | Validé (indexation en tâche de fond) |
 | Import d’un document | Modèle « Hibou · Import d’un document » : un Word ou un PDF repris fidèlement dans le gabarit le plus proche, puis proposé par PR | Validé |
-| Documents joints | Le texte d’un fichier joint au message est donné au modèle | Validé |
+| Documents joints | Texte, Markdown, CSV, JSON, code, HTML, Word, Excel, PowerPoint, PDF : texte extrait et donné au modèle ; images par la vision | Validé |
 | Mise à jour d’un document publié | Lire un document de la documentation et en proposer une nouvelle version par pull request | Validé (outil installé) |
 | Espace personnel | Conversations et fichiers propres à chaque compte : personne ne voit ceux des autres | Validé |
 | Charte Hibou | Thème nuit et brume, polices, logo, écran de démarrage, suggestions, modèle par défaut ; contrastes AA dans les deux thèmes | Validé (textes d’Open WebUI au vouvoiement) |
@@ -77,6 +78,9 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Nouveau projet en une commande | `forgejo-nouveau-depot` crée le dépôt, protège `main`, le clone, pose un `.gitignore` | Validé |
 | Pull request en une commande | `forgejo-pr` pousse la branche `agent/<sujet>` et ouvre la PR, « Demandé par @<personne> » | Validé |
 | Tickets | `forgejo-tickets` liste les tickets ouverts du projet ; « Closes #n » dans la PR les ferme à la fusion | Validé |
+| Tickets liés d’office | Branche `agent/<numéro>-<sujet>` ou « #numéro » dans un commit : `forgejo-pr` ajoute « Closes #numéro » si le ticket est ouvert | Validé |
+| Pièces jointes dans OpenCode | Texte et code joints au message ; images si le modèle a la vision ; PDF non lus (passer par le chat) | Validé |
+| Fournisseur unique | OpenCode ne propose que les modèles de Hibou (« OpenCode Zen », hébergé sur Internet, retiré) | Validé |
 | Jamais de PR vide | `forgejo-pr` refuse s’il reste des modifications non commitées ou si la branche n’a aucun commit | Validé |
 | Garde-fous | `main` protégée partout, pas de création de dépôt par push, refus d’office : `sudo`, `apt`, `rm -rf .git`, affichage des secrets… | Validé |
 | Compaction automatique | OpenCode résume la session quand elle approche de la limite du modèle | Validé |
@@ -92,7 +96,7 @@ machine d’essai : une seule carte de 4 Go, pas d’AVX2), **Prévu** (pas enco
 | Fusion humaine | Une approbation requise, push direct sur `main` refusé | Validé |
 | Site de documentation | `docs.<domaine>` (MkDocs, charte Hibou), reconstruit à chaque fusion ; tout ce qui est fusionné y apparaît | Validé |
 | Base de connaissances à jour | Chaque fusion, et chaque mise à jour de forge, remet « Hibou · Documentation » à l’image de `main` ; les nouveaux outils arrivent par pull request | Validé |
-| Paquets | Registres pip, npm et conteneurs de Forgejo, remplis par le miroir | Validé |
+| Paquets | Registres pip, npm et conteneurs de Forgejo, remplis par le miroir : sélection de départ de 55 paquets Python, 31 paquets npm (avec leurs dépendances), 11 images Docker, à adapter dans `miroir.d/` ; republié seulement s’il change | Validé |
 
 ## 7. Supervision, évaluation, sauvegardes
 

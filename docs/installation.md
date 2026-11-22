@@ -38,7 +38,7 @@ Le menu demande :
 | Carte de recherche (doc) | « Oui » si l’hôte doc a une petite carte en plus (4 à 8 Go) : elle porte les embeddings et le reranker au lieu de ralentir le LLM |
 | Miroir | versions de Python, listes pip, npm, git, images Docker |
 | Documentation de sécurité | « Oui » : guides de l’ANSSI (environ 170 Mo) et tes textes de référence (`securite.d/autres.txt`, `securite.d/ajouts/`) pour la base « Hibou · Sécurité » |
-| Administrateur, utilisateurs | dans l’ordre de priorité ; équipes doc, dev ou les deux |
+| Administrateur, utilisateurs | dans l’ordre de priorité ; équipes doc, dev ou les deux. La liste peut rester vide : `hibou comptes` après l’installation |
 | Phrase de passe | chiffre les secrets du bundle |
 
 Puis contrôle et taille :
@@ -102,6 +102,22 @@ Si doc est installé après forge (cas normal), relance une fois `./hibou mettre
 
 Seul ce qui a changé est copié et rechargé ; comptes, dépôts, conversations et sessions de l’agent sont conservés.
 Ensuite : `./hibou diagnostic` sur chaque hôte et `./hibou essai` sur l’hôte de forge.
+
+## Comptes des personnes
+
+```bash
+./hibou comptes                                   # menu : ajouter, équipes, priorité, retirer
+./hibou comptes lister
+./hibou comptes ajouter carole carole@hibou.lan doc,dev 2   # rang 2 dans la file ; mot de passe initial demandé
+./hibou comptes equipes carole dev
+./hibou comptes priorite carole 1
+./hibou comptes retirer carole                    # connexion bloquée ; dépôts et espace de travail gardés
+```
+
+Chaque changement met à jour `secrets.chiffre` du bundle puis s’applique à forge (compte Forgejo, équipes, instance
+OpenCode), doc et dev (clé personnelle et rang dans la file). Une VM sur un autre hôte est mise à jour par SSH
+(configuration seulement) ; si elle est injoignable, la commande dit quoi lancer sur son hôte. Les clés personnelles
+sont dans `/root/hibou-acces.txt` sur forge.
 Pour changer de cartes ou de profil : « Changer seulement les cartes et les modèles » au menu de `telecharger`.
 
 ## 7. Dépannage

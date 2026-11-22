@@ -86,6 +86,13 @@ Pour que forge redémarre seule sur l’autre nœud en cas de panne, il faut un 
 Sans l’un ou l’autre, la reprise de forge se fait par restauration de sa dernière sauvegarde sur l’autre nœud
 (quelques minutes pour forge, voir le journal des mesures).
 
+### VM sur plusieurs hôtes
+
+forge peut tourner sur le cluster et doc, dev sur les hôtes de leurs cartes. `hibou renouveler-secrets` et
+`hibou comptes` s’appliquent alors à chaque VM : sur l’hôte où on les lance si la VM y est, sinon par SSH
+(configuration seulement). Une VM injoignable est signalée avec la commande à lancer sur son hôte. Après un tel
+changement, recopie `secrets.chiffre` et `SHA256SUMS` du bundle sur les autres copies.
+
 ### Panne d’un nœud sans témoin
 
 En dernier recours seulement, sur le nœud restant : `pvecm expected 1` rend le cluster modifiable le temps de

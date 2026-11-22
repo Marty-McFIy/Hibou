@@ -648,6 +648,82 @@ Format : symptôme, cause, diff, test de preuve. Secrets masqués (`***`).
   par une commande ; cluster à deux nœuds : témoin QDevice (`corosync-qnetd`, `pvecm qdevice setup`), placement des VM, réplication ZFS + HA ou stockage partagé pour forge,
   `pvecm expected 1` en dernier recours.
 
+## B60 — L'import proposait un chemin sans dossier
+- Constat (F8) : le 4B proposait `docs/redemarrer-serveur-dimpression.md` ; publié tel quel, le document sortait du dossier de son gabarit.
+- Diff : `publier_forgejo` 0.4.2 range le document d'après le champ `modele` de son en-tête (`DOSSIERS`, comme les rédacteurs) et indique le chemin retenu.
+- Test : `docs/x.md` + `modele: procedure` → `docs/procedures/x.md` ; chemin déjà correct ou sans en-tête : inchangé. **Prouvé** (essai unitaire de `ranger`).
+
+## B61 — Nouvelles options jamais proposées à un bundle existant ; piège `set -e`
+- Constat : « La garder » reprenait `config.env` sans poser les questions apparues depuis (documentation de sécurité, carte de recherche) ; « Changer seulement les cartes »
+  ne posait pas celle de la sécurité. Et `(( HIBOU_RERANKER )) && note …` en fin de fonction rendait 1 sans carte de recherche : arrêt du script sous `set -e`.
+- Diff : `questions_nouvelles` pose les questions absentes de `config.env` puis l'enregistre ; questions sécurité et carte de recherche en fonctions ; test réécrit en `== 0 ||`.
+
+## B62 — `renouveler-secrets` supposait les trois VM sur le même hôte
+- Constat : en production forge est sur le cluster, doc et dev sur leurs hôtes ; la commande aurait déclaré « VM doc arrêtée » et ne l'aurait pas mise à jour.
+- Diff : `appliquer_role` : VM sur cet hôte → mise à jour complète ; VM d'un autre hôte joignable → copie du bundle et configuration par SSH (ni cartes, ni pilote, ni redémarrage) ;
+  injoignable → la commande à lancer sur son hôte. Utilisé par `renouveler-secrets` et `comptes`.
+- Test : `comptes priorite` avec doc traitée comme distante (`HIBOU_COMME_DISTANT=doc`) : « VM d'un autre hôte : configuration seulement », rangs de doc mis à jour. **Prouvé.**
+
+## B63 — Un PowerPoint joint au chat n'était jamais lu
+- Constat (test de 11 types de fichiers) : `.pptx` « failed », 0 caractère ; `unstructured` télécharge le modèle spaCy `en_core_web_sm` au premier PowerPoint (GitHub), impossible hors ligne.
+- Diff : le bundle livre ce modèle (adresse et empreinte SHA-256 lues dans l'image Open WebUI livrée), installé dans `/app/hibou-spacy` et rendu importable par un `.pth`
+  placé après `site-packages` (aucun module d'Open WebUI masqué) ; `hibou essai` contrôle Word, Excel, PowerPoint et PDF joints.
+- Test : `spacy.load("en_core_web_sm")` hors ligne ; 11 types : txt, md, csv, json, py, html, docx, xlsx, **pptx**, pdf lus (code retrouvé), png par la vision ; essai : « Documents joints Word,
+  Excel, PowerPoint, PDF : texte extrait des 4 formats ». **Prouvé.**
+
+## B64 — Images jointes retirées pour la plupart des modèles du chat
+- Constat : capture jointe à « Documentation interne » : « je n'ai pas accès à l'image » (378 s) ; seuls les rédacteurs déclaraient la vision, en dur (même sur un profil sans projecteur).
+- Diff : la capacité `vision` suit le modèle principal de doc (vraie s'il est servi avec son projecteur), pour tous les modèles bâtis sur lui.
+- Test : même capture : réponse en 10 à 13 s, lue à une lettre près (code de 5 lettres aléatoires ; limite de lecture du 4B). **Prouvé.**
+
+## B65 — Miroir : échecs silencieux et outil jamais mis à jour
+- Constats (miroir élargi) : 4 paquets refusés (pyserial : « Metadata-Version 2.0 » rejeté par twine ; nodemon, tailwindcss, napi-postinstall : « provenance » npm impossible hors ligne)
+  mais « Fait  Paquets publiés » et empreinte enregistrée, donc jamais réessayés ; et forge ne chargeait l'image `miroir` du bundle que si elle n'en avait aucune.
+- Diff : l'outil compte ses échecs et sort en erreur (le miroir n'est alors pas marqué importé) ; envoi direct par l'API PyPI de Forgejo quand twine refuse les métadonnées ;
+  `npm publish --provenance=false` ; image `miroir` du bundle chargée à chaque import.
+- Test : `hibou miroir` : « pypi : 1 publiés, 184 déjà présents ; npm : 3 publiés, 667 déjà présents ; import terminé », aucun échec. **Prouvé.**
+
+## F14 — `hibou comptes` (demande de l'utilisateur)
+- Personnes gérées sans tout réinstaller : `lister`, `ajouter <id> <courriel> <doc|dev|doc,dev> [rang]` (mot de passe initial demandé, ou sur l'entrée standard), `equipes`, `priorite`, `retirer`,
+  ou menu. La liste vit dans `secrets.chiffre` (comptes retirés gardés, bloqués à chaque passage) ; appliquée à forge (compte Forgejo, équipes alignées, instance OpenCode, fichier
+  d'accès), doc et dev (clé personnelle, rang dans la file), y compris sur d'autres hôtes (B62). Le premier menu peut se terminer sans personne. Chaque mise à jour de forge aligne les comptes.
+
+## F15 — Tickets liés d'office, consignes de l'agent
+- `forgejo-pr` ajoute « Closes #n » pour un ticket ouvert cité par la branche (`agent/<n>-<sujet>`) ou un commit (« #n ») ; consigne de l'agent : nommer ainsi la branche.
+- Test (dépôt jetable, faux Forgejo) : branche `agent/12-…`, commit « voir #13 » (fermé) : « Ticket #12 lié » seulement. **Prouvé.**
+
+## F16 — Miroir : sélection de départ, republication seulement s'il change
+- Listes par défaut d'un nouveau bundle : 55 paquets Python, 31 npm, 11 images Docker, 2 dépôts git ; `--legacy-peer-deps` (une liste sans lien ne doit pas échouer sur un conflit « peer »).
+  Empreinte du miroir notée après un import sans échec : mise à jour suivante « Miroir inchangé » (forge n° 74 : 4 min au lieu de 19).
+- Test : 1,4 Go (184 fichiers Python pour 3.11 et 3.12, 670 paquets npm, 11 images) ; depuis l'agent : `pip install fastapi pandas pytest`, `npm install zod express` servis par Forgejo. **Prouvé.**
+
+## F17 — OpenCode : seul le fournisseur Hibou, images jointes selon le modèle
+- Constat : le sélecteur d'OpenCode proposait aussi « OpenCode Zen » (modèles hébergés sur opencode.ai : Flint 40B Free, Big Pickle…), injoignable ici et qui enverrait le code à un tiers.
+- Diff : `enabled_providers: ["hibou"]` ; chaque modèle déclare `attachment` et `modalities` (images si servi avec son projecteur de vision).
+- Test : fournisseurs exposés par l'instance d'alice : `hibou` seul ; configuration générée : 27B de dev (≥ 48 Go) avec images, Coder-Next et 4B sans. **Prouvé.**
+
+## F18 — `hibou essai` : agent de code et documents bureautiques
+- Avec dev en ligne : dépôt jetable avec un ticket, instance OpenCode temporaire au nom du compte d'essai (configuration générique, clé de service), l'agent doit traiter le ticket
+  et ouvrir une PR non vide liée au ticket ; échec d'infrastructure = ÉCHEC, agent qui n'aboutit pas = ATTENTION (capacité du modèle). Formats Word, Excel, PowerPoint, PDF joints contrôlés.
+- Test (dev en ligne, doc arrêtée) : **20 contrôles OK sur 20** en 5 min : « Agent de code (ticket → pull request) : 143 s, 2 fichier(s), ticket lié », « Relecture automatique : avis en 16 s ».
+  Doc arrêtée, le chat a basculé sur le même modèle servi par dev (résilience d'Open WebUI) ; limite de l'essai : une réponse « sourcée » reste comptée quand les embeddings
+  échouent (Open WebUI joint quand même des sources) ; `hibou diagnostic` signale doc injoignable.
+
+## Pièces jointes : ce qui passe (demande de l'utilisateur)
+- **Open WebUI** : texte, Markdown, CSV, JSON, code, HTML, Word, Excel, PowerPoint (B63), PDF : texte extrait et donné au modèle (B59) ; images : par la vision (B64), lues par le 4B
+  à une lettre près sur un code aléatoire.
+- **OpenCode** : l'interface joint images, PDF et texte. Texte : lu (code retrouvé en 13 s). PDF : refusé (« le système ne supporte pas l'entrée de fichiers PDF ») : llama.cpp ne
+  lit pas les PDF ; passer par Open WebUI ou déposer le texte dans le dépôt. Images : seulement pour un modèle avec vision (27B de dev en production, pas le 4B d'essai) (F17).
+
+## B66 — Après un redémarrage de doc, le modèle tournait sur le processeur
+- Constat (essai final) : chat sans réponse en 300 s, puis 114 à 262 s par réponse ; carte à 1 Mio ; dans le conteneur llama-swap : `nvidia-smi` → « Failed to initialize NVML:
+  Unknown Error ». Défaut connu de Docker avec les cartes NVIDIA : un `systemctl daemon-reload` (phase socle de la mise à jour) retire les cartes aux conteneurs déjà démarrés.
+  La VM venait de redémarrer : conteneurs lancés au démarrage, puis mise à jour sans changement de leur configuration, donc jamais recréés.
+- Diff : `cartes_conteneurs` en fin de configuration de doc et dev : chaque conteneur à carte NVIDIA qui ne la voit plus est relancé (erreur claire s'il ne la voit toujours pas) ;
+  `hibou diagnostic` contrôle l'accès aux cartes depuis le serveur de modèles.
+- Test : diagnostic : « ÉCHEC Serveur de modèles doc : pas d'accès aux cartes » ; `systemctl daemon-reload` dans doc (NVML : Unknown Error), `mettre-a-jour doc` sans changement
+  de configuration : « hibou-doc-llama-swap-1 relancé : il avait perdu l'accès aux cartes », carte revue ; essai : 18 OK en 2 min. **Prouvé.**
+
 ## Écarts de charte non corrigés (décision ou limite)
 - Open WebUI : « Connectez-vous à Hibou (Open WebUI) » : la mention « (Open WebUI) » est imposée par sa licence ; textes français au vouvoiement (« Comment puis-je vous aider aujourd'hui ? »),
   compilés dans des fichiers JavaScript au nom changeant à chaque version : non modifiés (bricolage fragile).
